@@ -1,0 +1,137 @@
+workflows:
+  altstore-unsigned-ipa:
+    name: RunKit — Unsigned IPA (AltStore)
+    max_build_duration: 60
+
+    environment:
+      xcode: 16.2
+      groups: []
+
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch_patterns:
+        - pattern: master
+          include: true
+
+    scripts:
+      - name: Install XcodeGen
+        script: |
+          set -eo pipefail
+          # RunKit has no checked-in .xcodeproj — it's generated from project.yml.
+          which xcodegen || brew install xcodegen
+          xcodegen --version
+
+      - name: Set version and build number
+        script: |
+          set -eo pipefail
+          BUILD=$(git rev-list --count HEAD)
+          VERSION=$(grep -oE 'static let current = "[0-9.]+"' RunKit/App/RunKitApp.swift | grep -oE '[0-9]+\.[0-9]+' | head -1)
+          [ -z "$VERSION" ] && VERSION="0.01"
+          echo "Version $VERSION, build $BUILD"
+          # Inject into project.yml so the generated project carries them.
+          /usr/bin/sed -i '' "s/MARKETING_VERSION: \"[0-9.]*\"/MARKETING_VERSION: \"$VERSION\"/" project.yml
+          /usr/bin/sed -i '' "s/CURRENT_PROJECT_VERSION: \"[0-9]*\"/CURRENT_PROJECT_VERSION: \"$BUILD\"/" project.yml
+
+      - name: Generate Xcode project
+        script: |
+          set -eo pipefail
+          xcodegen generate
+          # Mirror version/build into the Info.plist too.
+          BUILD=$(git rev-list --count HEAD)
+          VERSION=$(grep -oE 'static let current = "[0-9.]+"' RunKit/App/RunKitApp.swift | grep -oE '[0-9]+\.[0-9]+' | head -1)
+          PLIST="RunKit/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$PLIST" 2>/dev/null || true
+          [ -n "$VERSION" ] && /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST" 2>/dev/null || true
+
+      - name: Build unsigned archive
+        script: |
+          set -eo pipefail
+          xcodebuild archive \
+            -project RunKit.xcodeproj \
+            -scheme RunKit \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$CM_BUILD_DIR/RunKit.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            OTHER_CODE_SIGN_FLAGS="--timestamp=none" \
+            ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=YES \
+            ENABLE_PREVIEWS=NO \
+            2>&1 | tee /tmp/xcodebuild.log
+          if [ ! -d "$CM_BUILD_DIR/RunKit.xcarchive/Products/Applications" ]; then
+            echo "ERROR: Archive produced no app bundle. Build failed."
+            grep -E "error:|Build FAILED" /tmp/xcodebuild.log | tail -40
+            exit 1
+          fi
+
+      - name: Package as unsigned .ipa for AltStore
+        script: |
+          set -eo pipefail
+          APP_PATH=$(find "$CM_BUILD_DIR/RunKit.xcarchive/Products/Applications" -name "*.app" -maxdepth 1 | head -1)
+          [ -z "$APP_PATH" ] && { echo "ERROR: No .app bundle found"; exit 1; }
+          mkdir -p "$CM_BUILD_DIR/Payload"
+          cp -r "$APP_PATH" "$CM_BUILD_DIR/Payload/"
+          BUILD=$(git rev-list --count HEAD)
+          VERSION=$(grep -oE 'static let current = "[0-9.]+"' RunKit/App/RunKitApp.swift | grep -oE '[0-9]+\.[0-9]+' | head -1)
+          [ -z "$VERSION" ] && VERSION="0.00"
+          IPA_NAME="RunKit_v${VERSION}_b${BUILD}.ipa"
+          ditto -c -k --sequesterRsrc --keepParent "$CM_BUILD_DIR/Payload" "$CM_BUILD_DIR/$IPA_NAME"
+          echo "IPA created: $CM_BUILD_DIR/$IPA_NAME"
+          ls -lh "$CM_BUILD_DIR/$IPA_NAME"
+
+    artifacts:
+      - "$CM_BUILD_DIR/RunKit_v*_b*.ipa"
+      - "/tmp/xcodebuild.log"
+
+    publishing:
+      email:
+        recipients:
+          - jbreg517@gmail.com
+        notify:
+          success: true
+          failure: true
+
+  # ---------------------------------------------------------------------------
+  # Signed TestFlight build — fill in once enrolled in the Apple Developer
+  # Program and an App Store Connect API key is added in the Codemagic UI
+  # (name it to match `integrations.app_store_connect`). Mirrors LiftKit.
+  # ---------------------------------------------------------------------------
+  ios-testflight:
+    name: RunKit — TestFlight (signed)
+    max_build_duration: 60
+    integrations:
+      app_store_connect: RunKit App Store Connect
+    environment:
+      xcode: 16.2
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.runkit.app
+    scripts:
+      - name: Install XcodeGen + generate project
+        script: |
+          set -eo pipefail
+          which xcodegen || brew install xcodegen
+          BUILD=$(git rev-list --count HEAD)
+          VERSION=$(grep -oE 'static let current = "[0-9.]+"' RunKit/App/RunKitApp.swift | grep -oE '[0-9]+\.[0-9]+' | head -1)
+          /usr/bin/sed -i '' "s/MARKETING_VERSION: \"[0-9.]*\"/MARKETING_VERSION: \"$VERSION\"/" project.yml
+          /usr/bin/sed -i '' "s/CURRENT_PROJECT_VERSION: \"[0-9]*\"/CURRENT_PROJECT_VERSION: \"$BUILD\"/" project.yml
+          xcodegen generate
+      - name: Set up signing
+        script: xcode-project use-profiles
+      - name: Build signed IPA
+        script: |
+          set -eo pipefail
+          xcode-project build-ipa --project RunKit.xcodeproj --scheme RunKit
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+      email:
+        recipients:
+          - jbreg517@gmail.com
