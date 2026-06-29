@@ -7,7 +7,7 @@ options:
 
 settings:
   base:
-    MARKETING_VERSION: "0.07"
+    MARKETING_VERSION: "0.08"
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: ""
     SWIFT_VERSION: "5.0"

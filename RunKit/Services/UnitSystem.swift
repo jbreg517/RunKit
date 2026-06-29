@@ -76,6 +76,11 @@ enum UnitSystem: String, CaseIterable, Identifiable {
 
     var spokenUnit: String { self == .metric ? "kilometer" : "mile" }
 
+    /// Distance phrased for speech, e.g. "3.2 kilometers".
+    func spokenDistance(_ meters: Double) -> String {
+        String(format: "%.1f %@s", distance(meters), spokenUnit)
+    }
+
     func spokenPace(seconds: Double, meters: Double) -> String {
         let d = distance(meters)
         guard d > 0.01, seconds > 0 else { return "unavailable" }

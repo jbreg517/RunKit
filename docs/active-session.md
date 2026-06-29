@@ -20,13 +20,20 @@
   - **Average pace/speed** — elapsed ÷ distance.
 - **Goal progress** bar when a goal was set.
 
-## Voice (`SpeechService`)
+## Voice coaching (`SpeechService`)
 - Announces each completed **kilometer/mile** ("Kilometer 3. Time 18 minutes 42
-  seconds. Average pace 6 minutes 14 seconds per kilometer.") and once when the
-  **goal** is reached.
+  seconds. Average pace 6 minutes 14 seconds per kilometer."), a **motivational
+  line** on goal-reached, and a **spoken finish recap** (distance, time, avg
+  pace/speed) with a motivational sign-off (`Motivation` lines, randomized).
+- **Choosable voice (v0.08):** accent — 🇺🇸 American / 🇬🇧 British / 🇦🇺 Australian
+  (`en-US`/`en-GB`/`en-AU`) — and gender (female/male). Picks the highest-quality
+  *installed* voice for that locale+gender (enhanced/premium if downloaded), with
+  fallbacks. Defaults to British female. Settings has a **Preview voice** button.
 - Uses `AVSpeechSynthesizer` with a `.playback`/`.duckOthers` audio session, so it
-  ducks music and works with the screen locked (target declares the `audio`
-  background mode). Toggle in Settings → Tracking → "Voice pace announcements".
+  ducks music and works screen-locked (target declares the `audio` background
+  mode). The finish recap uses `announceFinal`, which releases the audio session
+  only after speaking finishes (so it isn't cut off). Toggle: Settings ▸ Tracking ▸
+  "Voice coaching".
 
 ## Finish
 - `finalize()` resolves distance (GPS, with pedometer fallback for walk/run — see

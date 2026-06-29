@@ -345,7 +345,7 @@ struct ActivitySessionView: View {
 
         if !goalAnnounced, goalTarget > 0, goalFraction() >= 1 {
             goalAnnounced = true
-            if voiceOn { SpeechService.shared.announce("Goal reached. \(goalSpoken())") }
+            if voiceOn { SpeechService.shared.announce("\(Motivation.goal()) \(goalSpoken())") }
         }
     }
 
@@ -362,17 +362,28 @@ struct ActivitySessionView: View {
 
     private func goalSpoken() -> String {
         switch goalKind {
-        case .distance: return "\(unit.distanceString(goalTarget)) complete."
-        case .time:     return "\(spokenDuration(goalTarget)) complete."
+        case .distance: return "\(unit.spokenDistance(goalTarget)) reached."
+        case .time:     return "\(spokenDuration(goalTarget)) reached."
         case .none:     return ""
         }
+    }
+
+    /// Spoken end-of-run recap with a motivational sign-off.
+    private func finishRecap(for s: ActivitySession) -> String {
+        let duration = spokenDuration(s.activeSeconds)
+        guard s.distanceMeters > 50 else {
+            return "\(s.type.rawValue) complete. \(duration). \(Motivation.finish())"
+        }
+        let summary = s.type == .ride
+            ? "Average speed \(unit.spokenSpeed(seconds: s.activeSeconds, meters: s.distanceMeters))."
+            : "Average pace \(unit.spokenPace(seconds: s.activeSeconds, meters: s.distanceMeters))."
+        return "\(s.type.rawValue) complete. \(unit.spokenDistance(s.distanceMeters)) in \(duration). \(summary) \(Motivation.finish())"
     }
 
     private func finish() {
         ticker?.invalidate(); ticker = nil
         location.onPoint = nil
         location.stopTracking()
-        if voiceOn { SpeechService.shared.endAudio() }
 
         guard let s = session else { return }
         // Capture GPS results now (stable after stopTracking) and reset the UI
@@ -419,6 +430,14 @@ struct ActivitySessionView: View {
         s.distanceEstimated = estimated
         s.activeEnergyKcal = HealthCalc.kcal(type: s.type, minutes: seconds / 60)
         try? context.save()
+
+        // Spoken recap + motivation (releases the audio session when it finishes).
+        if voiceOn {
+            SpeechService.shared.announceFinal(finishRecap(for: s))
+        } else {
+            SpeechService.shared.endAudio()
+        }
+
         await HealthService.shared.save(s)
     }
 
