@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage("gpsEnabled") private var gpsEnabled = true
     @AppStorage("unitSystem") private var unitRaw = UnitSystem.metric.rawValue
+    @AppStorage("voiceAnnouncements") private var voiceOn = true
     @State private var showClear = false
 
     var body: some View {
@@ -37,10 +38,12 @@ struct SettingsView: View {
                 Section {
                     Toggle("Use GPS for sessions", isOn: $gpsEnabled)
                         .tint(RKColor.accent)
+                    Toggle("Voice pace announcements", isOn: $voiceOn)
+                        .tint(RKColor.accent)
                 } header: {
                     Text("Tracking")
                 } footer: {
-                    Text("GPS maps your route and measures distance for runs and rides. It’s only used while a session is running, and routes stay on your device.")
+                    Text("GPS maps your route and measures distance for runs and rides. It’s only used while a session is running, and routes stay on your device. Voice announces each \(unitRaw == UnitSystem.imperial.rawValue ? "mile" : "kilometer") and when you hit a goal.")
                 }
 
                 Section("Data") {

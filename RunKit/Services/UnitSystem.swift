@@ -64,4 +64,28 @@ enum UnitSystem: String, CaseIterable, Identifiable {
     func speedString(metersPerSecond mps: Double) -> String {
         String(format: "%.1f %@", distance(mps * 3600), speedUnit)
     }
+
+    /// Seconds-per-unit (e.g. current pace) → "m:ss /km" (or /mi).
+    func paceString(secondsPerUnit s: Double) -> String {
+        guard s > 0, s.isFinite else { return "--" }
+        let v = Int(s.rounded())
+        return String(format: "%d:%02d %@", v / 60, v % 60, paceUnit)
+    }
+
+    // MARK: Spoken (for voice announcements)
+
+    var spokenUnit: String { self == .metric ? "kilometer" : "mile" }
+
+    func spokenPace(seconds: Double, meters: Double) -> String {
+        let d = distance(meters)
+        guard d > 0.01, seconds > 0 else { return "unavailable" }
+        let p = Int((seconds / d).rounded()), m = p / 60, s = p % 60
+        return "\(m) minute\(m == 1 ? "" : "s") \(s) second\(s == 1 ? "" : "s") per \(spokenUnit)"
+    }
+
+    func spokenSpeed(seconds: Double, meters: Double) -> String {
+        guard seconds > 0, meters > 0 else { return "unavailable" }
+        let v = distance(meters) / (seconds / 3600)
+        return String(format: "%.1f %@s per hour", v, spokenUnit)
+    }
 }

@@ -18,6 +18,9 @@ final class ActivitySession {
     /// True when some of `distanceMeters` came from a fallback (pedometer fill or
     /// a straight-line GPS-gap bridge) rather than a clean GPS track.
     var distanceEstimated: Bool = false
+    /// Optional session goal: `"distance"` (meters) or `"time"` (seconds); nil = none.
+    var goalKind: String?
+    var goalTarget: Double = 0
     var notes: String?
 
     @Relationship(deleteRule: .cascade, inverse: \RoutePoint.session)

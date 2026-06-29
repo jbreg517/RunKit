@@ -1,37 +1,73 @@
 import SwiftUI
 import SwiftData
+import CoreLocation
+
+/// Session goal chosen in setup.
+enum GoalKind: String, CaseIterable, Identifiable {
+    case none, distance, time
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .none:     return "None"
+        case .distance: return "Distance"
+        case .time:     return "Time"
+        }
+    }
+}
 
 struct ActivitySessionView: View {
     @Environment(\.modelContext) private var context
+    @Environment(AppRouter.self) private var router
     @AppStorage("gpsEnabled") private var gpsEnabled = true
     @AppStorage("unitSystem") private var unitRaw = UnitSystem.metric.rawValue
+    @AppStorage("voiceAnnouncements") private var voiceOn = true
     private var unit: UnitSystem { UnitSystem(rawValue: unitRaw) ?? .metric }
-    @Environment(AppRouter.self) private var router
-    @State private var location = LocationService.shared
 
+    @State private var location = LocationService.shared
     @State private var selectedType: ActivityType = .walk
+
+    // Goal setup
+    @State private var goalKind: GoalKind = .none
+    @State private var goalValueText = ""
+
+    // Session lifecycle
     @State private var session: ActivitySession?
-    @State private var elapsed: TimeInterval = 0
     @State private var startDate: Date?
+    @State private var elapsed: TimeInterval = 0
     @State private var ticker: Timer?
+    @State private var countdown: Int?
+
+    // Live derived state
+    @State private var mapExpanded = true
+    @State private var displayedSpeedMps: Double = 0   // refreshed every 3s, smoothed
+    @State private var lastPaceUpdate: TimeInterval = 0
+    @State private var announcedUnits = 0
+    @State private var goalAnnounced = false
+    @State private var goalTarget: Double = 0          // meters or seconds
+
+    private var unitMeters: Double { unit == .metric ? 1000 : 1609.344 }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: RKSpacing.lg) {
-                if session == nil { setup } else { live }
+            ZStack {
+                RKColor.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: RKSpacing.lg) {
+                        if session == nil { setup } else { live }
+                    }
+                    .padding(.vertical, RKSpacing.lg)
+                    .readableWidth()
+                }
+                if let c = countdown { countdownOverlay(c) }
             }
-            .padding(.vertical, RKSpacing.lg)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .navigationTitle("Activity")
-            .background(RKColor.background.ignoresSafeArea())
             .onAppear { consumePendingType() }
             .onChange(of: router.pendingActivityType) { _, _ in consumePendingType() }
             .task { await HealthService.shared.requestAuthorization() }
         }
     }
 
-    /// Applies a type requested via History's "Do Again", once, when no session
-    /// is in progress.
+    /// Applies a type requested via History's "Do Again", once, when idle.
     private func consumePendingType() {
         guard session == nil, let type = router.pendingActivityType else { return }
         selectedType = type
@@ -58,46 +94,205 @@ struct ActivitySessionView: View {
                 Text("Cycling distance needs GPS. Without it this is a timer only.")
                     .font(RKFont.caption)
                     .foregroundColor(RKColor.textMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, RKSpacing.md)
             }
 
-            Button("Start \(selectedType.rawValue)") { start() }
+            goalSetup
+
+            Button("Start \(selectedType.rawValue)") { startCountdown() }
                 .buttonStyle(RKPrimaryButtonStyle())
                 .padding(.horizontal, RKSpacing.md)
         }
+    }
+
+    private var goalSetup: some View {
+        VStack(alignment: .leading, spacing: RKSpacing.sm) {
+            Text("Goal").font(RKFont.heading).foregroundColor(RKColor.textPrimary)
+            Picker("Goal", selection: $goalKind) {
+                ForEach(GoalKind.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            if goalKind == .distance {
+                HStack {
+                    TextField("0.0", text: $goalValueText)
+                        .keyboardType(.decimalPad)
+                        .textFieldStyle(.roundedBorder)
+                    Text(unit.distanceUnit).foregroundColor(RKColor.textSecondary)
+                }
+            } else if goalKind == .time {
+                HStack {
+                    TextField("0", text: $goalValueText)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.roundedBorder)
+                    Text("min").foregroundColor(RKColor.textSecondary)
+                }
+            }
+        }
+        .padding(RKSpacing.md)
+        .background(RKColor.surface)
+        .cornerRadius(RKRadius.large)
+        .padding(.horizontal, RKSpacing.md)
     }
 
     // MARK: Live
 
     private var live: some View {
         VStack(spacing: RKSpacing.lg) {
-            Image(systemName: selectedType.sfSymbol)
-                .font(.system(size: 40))
-                .foregroundColor(RKColor.accent)
+            if session?.usedGPS == true { mapCard }
+
             Text(timeString(elapsed))
-                .font(.system(size: 64, weight: .black, design: .monospaced))
+                .font(.system(size: 60, weight: .black, design: .monospaced))
                 .foregroundColor(RKColor.textPrimary)
                 .contentTransition(.numericText())
-            if session?.usedGPS == true {
-                Text(unit.distanceString(location.distanceMeters))
-                    .font(RKFont.heading)
-                    .foregroundColor(RKColor.accent)
-            }
+
+            metricsRow
+            if goalKind != .none { goalProgress }
+
             Button("Finish") { finish() }
                 .buttonStyle(RKPrimaryButtonStyle())
                 .padding(.horizontal, RKSpacing.md)
         }
     }
 
-    // MARK: Actions
+    private var mapCard: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut) { mapExpanded.toggle() }
+            } label: {
+                HStack {
+                    Label("Map", systemImage: "map.fill")
+                        .font(RKFont.bodyBold)
+                        .foregroundColor(RKColor.textPrimary)
+                    Spacer()
+                    Image(systemName: mapExpanded ? "chevron.up" : "chevron.down")
+                        .foregroundColor(RKColor.textSecondary)
+                }
+                .padding(RKSpacing.md)
+            }
+            if mapExpanded {
+                LiveRouteMapView(coordinates: location.coordinates,
+                                 current: location.lastLocation?.coordinate)
+                    .frame(height: 240)
+                    .clipShape(RoundedRectangle(cornerRadius: RKRadius.medium))
+                    .padding([.horizontal, .bottom], RKSpacing.md)
+            }
+        }
+        .background(RKColor.surface)
+        .cornerRadius(RKRadius.large)
+        .padding(.horizontal, RKSpacing.md)
+    }
 
-    private func start() {
+    private var metricsRow: some View {
+        HStack(spacing: RKSpacing.md) {
+            metric(unit.distanceString(location.distanceMeters), "Distance")
+            metric(currentPaceString, session?.type == .ride ? "Cur Speed" : "Cur Pace")
+            metric(overallPaceString, session?.type == .ride ? "Avg Speed" : "Avg Pace")
+        }
+        .padding(.horizontal, RKSpacing.md)
+    }
+
+    private func metric(_ value: String, _ label: String) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundColor(RKColor.textPrimary)
+                .lineLimit(1).minimumScaleFactor(0.5)
+            Text(label).font(RKFont.caption).foregroundColor(RKColor.textMuted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, RKSpacing.md)
+        .background(RKColor.surface)
+        .cornerRadius(RKRadius.large)
+    }
+
+    private var goalProgress: some View {
+        VStack(alignment: .leading, spacing: RKSpacing.sm) {
+            HStack {
+                Text("Goal").font(RKFont.bodyBold).foregroundColor(RKColor.textPrimary)
+                Spacer()
+                Text(goalLabel()).font(RKFont.caption).foregroundColor(RKColor.textSecondary)
+            }
+            ProgressView(value: goalFraction()).tint(RKColor.accent)
+        }
+        .padding(RKSpacing.md)
+        .background(RKColor.surface)
+        .cornerRadius(RKRadius.large)
+        .padding(.horizontal, RKSpacing.md)
+    }
+
+    private func countdownOverlay(_ c: Int) -> some View {
+        ZStack {
+            Color.black.opacity(0.7).ignoresSafeArea()
+            Text("\(c)")
+                .font(.system(size: 160, weight: .black, design: .rounded))
+                .foregroundColor(RKColor.accent)
+                .transition(.scale.combined(with: .opacity))
+                .id(c)
+        }
+    }
+
+    // MARK: Derived strings
+
+    private var currentPaceString: String {
+        guard displayedSpeedMps > 0.2 else { return "--" }
+        if session?.type == .ride { return unit.speedString(metersPerSecond: displayedSpeedMps) }
+        return unit.paceString(secondsPerUnit: unitMeters / displayedSpeedMps)
+    }
+
+    private var overallPaceString: String {
+        let d = location.distanceMeters
+        if session?.type == .ride { return unit.speedString(seconds: elapsed, meters: d) }
+        return unit.paceString(seconds: elapsed, meters: d)
+    }
+
+    private func goalFraction() -> Double {
+        guard goalTarget > 0 else { return 0 }
+        let value = goalKind == .distance ? location.distanceMeters : elapsed
+        return min(1, value / goalTarget)
+    }
+
+    private func goalLabel() -> String {
+        switch goalKind {
+        case .distance: return "\(unit.distanceString(location.distanceMeters)) / \(unit.distanceString(goalTarget))"
+        case .time:     return "\(timeString(elapsed)) / \(timeString(goalTarget))"
+        case .none:     return ""
+        }
+    }
+
+    // MARK: Lifecycle
+
+    /// 3-2-1 visual countdown, then the session begins.
+    private func startCountdown() {
+        withAnimation { countdown = 3 }
+        let t = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
+            guard let c = countdown else { timer.invalidate(); return }
+            if c <= 1 {
+                timer.invalidate()
+                withAnimation { countdown = nil }
+                if voiceOn { SpeechService.shared.announce("Go") }
+                beginActiveSession()
+            } else {
+                withAnimation { countdown = c - 1 }
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+    }
+
+    private func beginActiveSession() {
         let s = ActivitySession(type: selectedType)
         s.usedGPS = gpsEnabled
+        goalTarget = resolvedGoalTarget()
+        s.goalKind = goalKind == .none ? nil : goalKind.rawValue
+        s.goalTarget = goalTarget
         context.insert(s)
         session = s
         startDate = Date()
         elapsed = 0
+        displayedSpeedMps = 0
+        lastPaceUpdate = 0
+        announcedUnits = 0
+        goalAnnounced = false
 
         if gpsEnabled {
             if location.authorization == .notDetermined { location.requestPermission() }
@@ -117,17 +312,67 @@ struct ActivitySessionView: View {
             location.startTracking()
         }
 
-        let t = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            if let start = startDate { elapsed = Date().timeIntervalSince(start) }
-        }
+        let t = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in tick() }
         ticker = t
         RunLoop.main.add(t, forMode: .common)
+    }
+
+    private func resolvedGoalTarget() -> Double {
+        switch goalKind {
+        case .distance: return unit.meters(fromDisplay: goalValueText) ?? 0
+        case .time:     return (Double(goalValueText) ?? 0) * 60
+        case .none:     return 0
+        }
+    }
+
+    /// Once-a-second update: timer, smoothed current pace (every 3s), voice marks.
+    private func tick() {
+        guard let start = startDate else { return }
+        elapsed = Date().timeIntervalSince(start)
+
+        if elapsed - lastPaceUpdate >= 3 {
+            displayedSpeedMps = location.currentSpeedMps
+            lastPaceUpdate = elapsed
+        }
+
+        if location.distanceMeters > 0 {
+            let units = Int(location.distanceMeters / unitMeters)
+            if units > announcedUnits {
+                announcedUnits = units
+                announceUnitMark(units)
+            }
+        }
+
+        if !goalAnnounced, goalTarget > 0, goalFraction() >= 1 {
+            goalAnnounced = true
+            if voiceOn { SpeechService.shared.announce("Goal reached. \(goalSpoken())") }
+        }
+    }
+
+    private func announceUnitMark(_ n: Int) {
+        guard voiceOn else { return }
+        let isRide = session?.type == .ride
+        let paceOrSpeed = isRide
+            ? unit.spokenSpeed(seconds: elapsed, meters: location.distanceMeters)
+            : unit.spokenPace(seconds: elapsed, meters: location.distanceMeters)
+        let label = isRide ? "average speed" : "average pace"
+        SpeechService.shared.announce(
+            "\(unit.spokenUnit) \(n). Time \(spokenDuration(elapsed)). \(label) \(paceOrSpeed).")
+    }
+
+    private func goalSpoken() -> String {
+        switch goalKind {
+        case .distance: return "\(unit.distanceString(goalTarget)) complete."
+        case .time:     return "\(spokenDuration(goalTarget)) complete."
+        case .none:     return ""
+        }
     }
 
     private func finish() {
         ticker?.invalidate(); ticker = nil
         location.onPoint = nil
         location.stopTracking()
+        if voiceOn { SpeechService.shared.endAudio() }
 
         guard let s = session else { return }
         // Capture GPS results now (stable after stopTracking) and reset the UI
@@ -179,6 +424,13 @@ struct ActivitySessionView: View {
 
     private func timeString(_ t: TimeInterval) -> String {
         let secs = Int(t)
+        if secs >= 3600 { return String(format: "%d:%02d:%02d", secs / 3600, (secs % 3600) / 60, secs % 60) }
         return String(format: "%02d:%02d", secs / 60, secs % 60)
+    }
+
+    private func spokenDuration(_ t: TimeInterval) -> String {
+        let s = Int(t), m = s / 60, sec = s % 60
+        if m == 0 { return "\(sec) second\(sec == 1 ? "" : "s")" }
+        return "\(m) minute\(m == 1 ? "" : "s") \(sec) second\(sec == 1 ? "" : "s")"
     }
 }

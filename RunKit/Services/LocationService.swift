@@ -24,6 +24,13 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     /// treated as bridging a GPS outage; the connecting segment is estimated.
     private let gapThreshold: TimeInterval = 8
 
+    /// Live route coordinates (for the active-session map) and a rolling speed
+    /// estimate over a trailing window, both reset at the start of each track.
+    private(set) var coordinates: [CLLocationCoordinate2D] = []
+    private(set) var currentSpeedMps: Double = 0
+    private var speedSamples: [(t: Date, d: Double)] = []
+    private let speedWindow: TimeInterval = 20
+
     /// Called for each accepted fix with whether its incoming segment was
     /// estimated (bridged a gap), so a session can persist route points.
     var onPoint: ((CLLocation, Bool) -> Void)?
@@ -46,6 +53,9 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         lastLocation = nil
         lastFixTime = nil
         hadGap = false
+        coordinates = []
+        speedSamples = []
+        currentSpeedMps = 0
         isTracking = true
         // Safe to enable only because UIBackgroundModes includes `location`.
         manager.allowsBackgroundLocationUpdates = true
@@ -84,6 +94,17 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
             }
             lastLocation = loc
             lastFixTime = loc.timestamp
+
+            // Live route + rolling speed over the trailing window.
+            coordinates.append(loc.coordinate)
+            speedSamples.append((loc.timestamp, distanceMeters))
+            let cutoff = loc.timestamp.addingTimeInterval(-speedWindow)
+            speedSamples.removeAll { $0.t < cutoff }
+            if let first = speedSamples.first {
+                let dt = loc.timestamp.timeIntervalSince(first.t)
+                if dt >= 3 { currentSpeedMps = max(0, (distanceMeters - first.d) / dt) }
+            }
+
             onPoint?(loc, estimated)
         }
     }
