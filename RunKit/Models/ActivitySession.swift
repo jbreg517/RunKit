@@ -15,6 +15,9 @@ final class ActivitySession {
     var activeEnergyKcal: Double = 0
     var usedGPS: Bool = false
     var manualDistance: Bool = false
+    /// True when some of `distanceMeters` came from a fallback (pedometer fill or
+    /// a straight-line GPS-gap bridge) rather than a clean GPS track.
+    var distanceEstimated: Bool = false
     var notes: String?
 
     @Relationship(deleteRule: .cascade, inverse: \RoutePoint.session)

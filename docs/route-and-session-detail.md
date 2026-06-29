@@ -1,7 +1,31 @@
 # RunKit — Route Recording & Session Detail
 
 > Feature spec for the GPS route + the session detail screen. Companion to
-> [`REQUIREMENTS.md`](REQUIREMENTS.md). Status: **designed, not yet built.**
+> [`REQUIREMENTS.md`](REQUIREMENTS.md). Status: **detail built in v0.02** (Phase 1,
+> read-only) and **edit / Do Again / delete in v0.03** (Phase 2). GPX export and
+> writing the route into Apple Health remain for later phases.
+
+## GPS-failure fallback & estimated distance (v0.02)
+
+GPS can drop out mid-session (tunnels, urban canyons, indoors, or going into a
+pocket). RunKit no longer loses that distance or draws a misleading straight line
+as if it were measured:
+
+- **Detection:** `LocationService` flags any accepted fix that arrives > 8 s after
+  the previous one as bridging an outage. The bridged `RoutePoint.isEstimated =
+  true`; the service also raises `hadGap`.
+- **Distance fallback (at `finish()`):**
+  - Walk/run with a GPS dropout (or a fully indoor session where GPS gave nothing)
+    → fall back to the **`CMPedometer`** distance for the session window when it
+    measured more than GPS; the coprocessor keeps counting when GPS can't.
+  - Ride with a dropout → keep the straight-line bridge (no pedometer for cycling),
+    marked estimated.
+  - GPS off entirely (walk/run) → pedometer distance, as before — the expected
+    source, **not** flagged estimated.
+  - The session records `distanceEstimated` whenever a fallback contributed.
+- **On the map:** measured stretches draw solid accent; estimated stretches draw
+  faded + dashed, with a "GPS / Estimated" legend. History rows and the detail
+  Distance tile show a `~` / "estimated" marker when `distanceEstimated` is set.
 
 This covers two linked pieces:
 1. **Route recording** — capturing and storing the GPS path during an active session.
@@ -25,7 +49,11 @@ chooses to write into Apple Health.
 | `altitude` | metres, for elevation gain |
 | `horizontalAccuracy` | metres; used to filter noise |
 | `speed` | m/s reported by Core Location (≥0) |
+| `isEstimated` | the segment ending at this point bridged a GPS outage (v0.02) |
 | `session` | parent `ActivitySession` (cascade delete) |
+
+`ActivitySession.distanceEstimated` (v0.02) records that some of the session's
+distance came from a fallback rather than a clean GPS track.
 
 `ActivitySession.route` holds the points; `sortedRoute` returns them in time order.
 
@@ -140,20 +168,41 @@ Today `HealthService.save` writes an `HKWorkout` only. To attach the GPS route:
 
 ---
 
-## 5. File plan (when implemented)
-New:
-- `Views/SessionDetailView.swift` — the screen above.
-- `Views/RouteMapView.swift` — reusable polyline map (thumbnail + fullscreen).
-- `Services/RouteMath.swift` — splits, elevation gain, downsampling, pace/distance/
-  speed formatting + `UnitSystem`.
+## 5. File plan
 
-Changed:
-- `Views/HistoryView.swift` — rows become `NavigationLink → SessionDetailView`; add
-  optional route thumbnail.
+Built in v0.02 (Phase 0 + 1):
+- `Services/UnitSystem.swift` — metric/imperial + distance/pace/speed/elevation
+  formatters (Phase 0; split out from `RouteMath` so every screen shares it).
+- `Services/RouteMath.swift` — GPS-vs-estimated segmenting, splits, elevation gain,
+  max speed, downsampling, bounding region.
+- `Views/RouteMapView.swift` — reusable polyline map (solid GPS / dashed estimated +
+  legend; thumbnail → fullscreen).
+- `Views/SessionDetailView.swift` — read-only detail screen.
+- `Models/RoutePoint.swift` — added `isEstimated` + a `coordinate` helper.
+- `Models/ActivitySession.swift` — added `distanceEstimated`.
+- `Services/LocationService.swift` — gap detection; `onPoint` now passes the
+  estimated flag; exposes `hadGap`.
+- `Services/MotionService.swift` — one-shot `pedometer(from:to:)` window query
+  (steps + distance) for the fallback.
+- `Views/ActivitySessionView.swift` — async `finalize()` resolving distance/steps
+  with the pedometer fallback.
+- `Views/HistoryView.swift` — rows are `NavigationLink → SessionDetailView`; `~`
+  marker when estimated. (Route thumbnails per row deferred — perf.)
+- `Views/SettingsView.swift`, `Views/TodayView.swift` — adopt `UnitSystem`.
+
+Built in v0.03 (Phase 2):
+- `App/AppRouter.swift` — shared tab/selection state so "Do Again" can switch to the
+  Activity tab and preselect the type without coupling the views.
+- `Views/SessionDetailView.swift` — Edit (staged-draft sheet: type, notes, and
+  distance for rides/manual sessions), "Do Again", and Delete (confirmed). Manual
+  distance sets `manualDistance` and clears `distanceEstimated`; saving recomputes
+  calories via `HealthCalc.kcal`.
+- `Views/ActivitySessionView.swift` — consumes `pendingActivityType`.
+
+Deferred to a later phase:
 - `Services/HealthService.swift` — `HKWorkoutBuilder` + `HKWorkoutRouteBuilder`,
-  add `workoutRoute()` to write types.
-
-No model changes needed — `RoutePoint` already captures everything.
+  add `workoutRoute()` to write types (§3). Currently still writes an `HKWorkout`.
+- GPX export (§2.1 actions) — folding into a later export pass with CSV.
 
 ---
 

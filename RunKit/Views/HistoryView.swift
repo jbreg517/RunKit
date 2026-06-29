@@ -3,6 +3,8 @@ import SwiftData
 
 struct HistoryView: View {
     @Environment(\.modelContext) private var context
+    @AppStorage("unitSystem") private var unitRaw = UnitSystem.metric.rawValue
+    private var unit: UnitSystem { UnitSystem(rawValue: unitRaw) ?? .metric }
     @Query(sort: \ActivitySession.startedAt, order: .reverse) private var sessions: [ActivitySession]
 
     private var completed: [ActivitySession] { sessions.filter { $0.endedAt != nil } }
@@ -18,10 +20,15 @@ struct HistoryView: View {
                     )
                 } else {
                     List {
-                        ForEach(completed) { s in row(s) }
-                            .onDelete(perform: delete)
+                        ForEach(completed) { s in
+                            NavigationLink(value: s) { row(s) }
+                        }
+                        .onDelete(perform: delete)
                     }
                     .scrollContentBackground(.hidden)
+                    .navigationDestination(for: ActivitySession.self) { s in
+                        SessionDetailView(session: s)
+                    }
                 }
             }
             .navigationTitle("History")
@@ -45,7 +52,7 @@ struct HistoryView: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
                 if s.distanceMeters > 0 {
-                    Text(String(format: "%.2f km", s.distanceMeters / 1000))
+                    Text((s.distanceEstimated ? "~" : "") + unit.distanceString(s.distanceMeters))
                         .font(RKFont.bodyBold)
                         .foregroundColor(RKColor.textPrimary)
                 }

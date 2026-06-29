@@ -4,7 +4,7 @@ import SwiftData
 /// Bumped +0.01 per push (shared convention with LiftKit). CI derives the build
 /// number from the git commit count.
 enum AppVersion {
-    static let current = "0.01"
+    static let current = "0.03"
 }
 
 @main
@@ -29,17 +29,24 @@ struct RunKitApp: App {
 }
 
 struct RootTabView: View {
+    @State private var router = AppRouter()
+
     var body: some View {
-        TabView {
+        TabView(selection: $router.selectedTab) {
             TodayView()
                 .tabItem { Label("Today", systemImage: "circle.dashed") }
+                .tag(AppRouter.Tab.today)
             ActivitySessionView()
                 .tabItem { Label("Activity", systemImage: "figure.run") }
+                .tag(AppRouter.Tab.activity)
             HistoryView()
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+                .tag(AppRouter.Tab.history)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                .tag(AppRouter.Tab.settings)
         }
         .tint(RKColor.accent)
+        .environment(router)
     }
 }

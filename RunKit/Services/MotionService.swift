@@ -8,6 +8,9 @@ import Observation
 final class MotionService {
     static let shared = MotionService()
     private let pedometer = CMPedometer()
+    /// Separate instance for one-shot session queries so they don't disturb the
+    /// live "today" stream (CMPedometer allows only one active update stream).
+    private let sessionPedometer = CMPedometer()
 
     var steps: Int = 0
     var distanceMeters: Double = 0
@@ -29,6 +32,20 @@ final class MotionService {
     }
 
     func stop() { pedometer.stopUpdates() }
+
+    /// One-shot pedometer totals over a window — the GPS-independent fallback for
+    /// a finished session's steps and (for walk/run) distance. `nil` if the
+    /// coprocessor is unavailable or denied.
+    func pedometer(from start: Date, to end: Date) async -> (steps: Int, distance: Double?)? {
+        guard CMPedometer.isStepCountingAvailable() else { return nil }
+        return await withCheckedContinuation { continuation in
+            sessionPedometer.queryPedometerData(from: start, to: end) { data, _ in
+                guard let data else { continuation.resume(returning: nil); return }
+                continuation.resume(returning: (data.numberOfSteps.intValue,
+                                                data.distance?.doubleValue))
+            }
+        }
+    }
 
     private func apply(_ data: CMPedometerData) {
         steps = data.numberOfSteps.intValue

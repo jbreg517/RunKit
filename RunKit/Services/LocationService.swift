@@ -15,9 +15,18 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     var isTracking = false
     private(set) var distanceMeters: Double = 0
     private(set) var lastLocation: CLLocation?
+    /// True if the track had at least one GPS outage (gap between accepted fixes),
+    /// so the session knows its distance is partly estimated.
+    private(set) var hadGap = false
+    private var lastFixTime: Date?
 
-    /// Called for each accepted fix, so a session can persist route points.
-    var onPoint: ((CLLocation) -> Void)?
+    /// A fix arriving more than this long after the previous accepted one is
+    /// treated as bridging a GPS outage; the connecting segment is estimated.
+    private let gapThreshold: TimeInterval = 8
+
+    /// Called for each accepted fix with whether its incoming segment was
+    /// estimated (bridged a gap), so a session can persist route points.
+    var onPoint: ((CLLocation, Bool) -> Void)?
 
     override init() {
         super.init()
@@ -35,6 +44,8 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     func startTracking() {
         distanceMeters = 0
         lastLocation = nil
+        lastFixTime = nil
+        hadGap = false
         isTracking = true
         // Safe to enable only because UIBackgroundModes includes `location`.
         manager.allowsBackgroundLocationUpdates = true
@@ -59,13 +70,21 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         for loc in locations {
             // Drop noisy / invalid fixes.
             guard loc.horizontalAccuracy >= 0, loc.horizontalAccuracy < 50 else { continue }
+            var estimated = false
             if let last = lastLocation {
                 let step = loc.distance(from: last)
                 guard step > 1 else { continue }   // ignore sub-meter jitter
+                // A long pause between accepted fixes means GPS dropped out; the
+                // straight line bridging the gap is an estimate, not a measured path.
+                if let t = lastFixTime, loc.timestamp.timeIntervalSince(t) > gapThreshold {
+                    estimated = true
+                    hadGap = true
+                }
                 distanceMeters += step
             }
             lastLocation = loc
-            onPoint?(loc)
+            lastFixTime = loc.timestamp
+            onPoint?(loc, estimated)
         }
     }
 }

@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage("dailyStepGoal") private var goal = 8000
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage("gpsEnabled") private var gpsEnabled = true
+    @AppStorage("unitSystem") private var unitRaw = UnitSystem.metric.rawValue
     @State private var showClear = false
 
     var body: some View {
@@ -20,6 +21,15 @@ struct SettingsView: View {
                         Text("System").tag("system")
                         Text("Light").tag("light")
                         Text("Dark").tag("dark")
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Section("Units") {
+                    Picker("Measurement", selection: $unitRaw) {
+                        ForEach(UnitSystem.allCases) { u in
+                            Text(u.label).tag(u.rawValue)
+                        }
                     }
                     .pickerStyle(.segmented)
                 }

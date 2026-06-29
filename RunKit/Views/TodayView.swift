@@ -2,6 +2,8 @@ import SwiftUI
 
 struct TodayView: View {
     @AppStorage("dailyStepGoal") private var goal = 8000
+    @AppStorage("unitSystem") private var unitRaw = UnitSystem.metric.rawValue
+    private var unit: UnitSystem { UnitSystem(rawValue: unitRaw) ?? .metric }
     @State private var motion = MotionService.shared
 
     private var progress: Double {
@@ -59,7 +61,7 @@ struct TodayView: View {
 
     private var statsGrid: some View {
         HStack(spacing: RKSpacing.md) {
-            stat(String(format: "%.2f", motion.distanceMeters / 1000), "km", "map")
+            stat(String(format: "%.2f", unit.distance(motion.distanceMeters)), unit.distanceUnit, "map")
             stat("\(motion.flights)", "flights", "stairs")
             stat("\(Int(estimatedKcal))", "kcal", "flame.fill")
         }
