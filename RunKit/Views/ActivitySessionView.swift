@@ -26,6 +26,7 @@ struct ActivitySessionView: View {
             .background(RKColor.background.ignoresSafeArea())
             .onAppear { consumePendingType() }
             .onChange(of: router.pendingActivityType) { _, _ in consumePendingType() }
+            .task { await HealthService.shared.requestAuthorization() }
         }
     }
 

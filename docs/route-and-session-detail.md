@@ -2,8 +2,8 @@
 
 > Feature spec for the GPS route + the session detail screen. Companion to
 > [`REQUIREMENTS.md`](REQUIREMENTS.md). Status: **detail built in v0.02** (Phase 1,
-> read-only) and **edit / Do Again / delete in v0.03** (Phase 2). GPX export and
-> writing the route into Apple Health remain for later phases.
+> read-only), **edit / Do Again / delete in v0.03** (Phase 2), and **route writing
+> into Apple Health in v0.04** (Phase 3). GPX export remains for a later phase.
 
 ## GPS-failure fallback & estimated distance (v0.02)
 
@@ -139,19 +139,18 @@ Add a small `Pace`/`Distance` formatter helper (`Services/RouteMath.swift`).
 
 ---
 
-## 3. Writing the route to Apple Health
+## 3. Writing the route to Apple Health (built in v0.04)
 
-Today `HealthService.save` writes an `HKWorkout` only. To attach the GPS route:
+`HealthService.save` uses the workout builder and attaches the GPS route:
 
-1. Add `HKSeriesType.workoutRoute()` to `writeTypes`.
-2. Replace the deprecated `HKWorkout(...)` initializer with the builder flow:
-   - `HKWorkoutBuilder(healthStore:device:)` → `beginCollection(at:)` →
-     add distance/energy samples → `endCollection(at:)` → `finishWorkout()`.
-   - Then `HKWorkoutRouteBuilder(healthStore:device:)` →
-     `insertRouteData(sortedRoute → [CLLocation])` →
-     `finishRoute(with: workout, metadata: nil)`.
-3. Reconstruct `CLLocation`s from `RoutePoint`s (coordinate, altitude, accuracies,
-   timestamp). This makes RunKit routes appear in Apple Fitness alongside the suite.
+1. `HKSeriesType.workoutRoute()` is in `writeTypes`; authorization is now actually
+   requested (Activity tab `.task` → `requestAuthorization()`, previously dead code).
+2. `HKWorkoutBuilder` flow: `beginCollection(at:)` → add distance (walking/running
+   or cycling) + active-energy samples → `endCollection(at:)` → `finishWorkout()`.
+   `HKWorkoutConfiguration.locationType` is `.outdoor` for GPS sessions, else `.unknown`.
+3. When `route.count >= 2`, `attachRoute` rebuilds `CLLocation`s from `RoutePoint`s
+   and writes them via `HKWorkoutRouteBuilder.insertRouteData` →
+   `finishRoute(with:metadata:)`. All best-effort and on-device only.
 
 > Permission, battery, and on-device storage are unchanged — the route is written
 > only to the user's own Health database, never to a server.
@@ -199,9 +198,13 @@ Built in v0.03 (Phase 2):
   calories via `HealthCalc.kcal`.
 - `Views/ActivitySessionView.swift` — consumes `pendingActivityType`.
 
-Deferred to a later phase:
+Built in v0.04 (Phase 3):
 - `Services/HealthService.swift` — `HKWorkoutBuilder` + `HKWorkoutRouteBuilder`,
-  add `workoutRoute()` to write types (§3). Currently still writes an `HKWorkout`.
+  `workoutRoute()` write type, contextual authorization request (§3).
+- App icon — winged-shoe emblem in LiftKit's gold-on-dark theme
+  (`Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`).
+
+Deferred to a later phase:
 - GPX export (§2.1 actions) — folding into a later export pass with CSV.
 
 ---
