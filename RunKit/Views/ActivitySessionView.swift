@@ -29,6 +29,7 @@ struct ActivitySessionView: View {
     // Goal setup
     @State private var goalKind: GoalKind = .none
     @State private var goalValueText = ""
+    @FocusState private var goalFieldFocused: Bool
 
     // Session lifecycle
     @State private var session: ActivitySession?
@@ -57,10 +58,19 @@ struct ActivitySessionView: View {
                     }
                     .padding(.vertical, RKSpacing.lg)
                     .readableWidth()
+                    .contentShape(Rectangle())
+                    .onTapGesture { goalFieldFocused = false }
                 }
+                .scrollDismissesKeyboard(.interactively)
                 if let c = countdown { countdownOverlay(c) }
             }
             .navigationTitle("Activity")
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { goalFieldFocused = false }
+                }
+            }
             .onAppear { consumePendingType() }
             .onChange(of: router.pendingActivityType) { _, _ in consumePendingType() }
             .task { await HealthService.shared.requestAuthorization() }
@@ -118,6 +128,7 @@ struct ActivitySessionView: View {
                     TextField("0.0", text: $goalValueText)
                         .keyboardType(.decimalPad)
                         .textFieldStyle(.roundedBorder)
+                        .focused($goalFieldFocused)
                     Text(unit.distanceUnit).foregroundColor(RKColor.textSecondary)
                 }
             } else if goalKind == .time {
@@ -125,6 +136,7 @@ struct ActivitySessionView: View {
                     TextField("0", text: $goalValueText)
                         .keyboardType(.numberPad)
                         .textFieldStyle(.roundedBorder)
+                        .focused($goalFieldFocused)
                     Text("min").foregroundColor(RKColor.textSecondary)
                 }
             }
@@ -264,6 +276,7 @@ struct ActivitySessionView: View {
 
     /// 3-2-1 visual countdown, then the session begins.
     private func startCountdown() {
+        goalFieldFocused = false
         withAnimation { countdown = 3 }
         let t = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
             guard let c = countdown else { timer.invalidate(); return }
