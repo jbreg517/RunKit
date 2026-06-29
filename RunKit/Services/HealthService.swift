@@ -65,7 +65,7 @@ final class HealthService {
                         start: session.startedAt, end: end))
                 }
             }
-            if !samples.isEmpty { try await builder.add(samples) }
+            if !samples.isEmpty { try await add(samples, to: builder) }
 
             try await builder.endCollection(at: end)
             guard let workout = try await builder.finishWorkout() else { return }
@@ -73,6 +73,17 @@ final class HealthService {
             await attachRoute(from: session, to: workout)
         } catch {
             // On-device only; nothing user-facing in v1.
+        }
+    }
+
+    /// `HKWorkoutBuilder.add(_:)` has no async bridge in this SDK, so wrap the
+    /// completion-handler form.
+    private func add(_ samples: [HKSample], to builder: HKWorkoutBuilder) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            builder.add(samples) { _, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
         }
     }
 
