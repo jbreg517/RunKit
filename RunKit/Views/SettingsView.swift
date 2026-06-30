@@ -10,6 +10,7 @@ struct SettingsView: View {
     @AppStorage("voiceAnnouncements") private var voiceOn = true
     @AppStorage("voiceAccent") private var voiceAccent = VoiceAccent.british.rawValue
     @AppStorage("voiceGender") private var voiceGender = VoiceGender.female.rawValue
+    @AppStorage("coachStyle") private var coachStyle = CoachStyle.system.rawValue
     @State private var showClear = false
 
     var body: some View {
@@ -43,18 +44,24 @@ struct SettingsView: View {
                     Toggle("Voice coaching", isOn: $voiceOn)
                         .tint(RKColor.accent)
                     if voiceOn {
-                        Picker("Accent", selection: $voiceAccent) {
-                            ForEach(VoiceAccent.allCases) { a in
-                                Text("\(a.flag)  \(a.label)").tag(a.rawValue)
-                            }
-                        }
-                        Picker("Voice", selection: $voiceGender) {
-                            ForEach(VoiceGender.allCases) { g in
-                                Text(g.label).tag(g.rawValue)
-                            }
+                        Picker("Coach voice", selection: $coachStyle) {
+                            ForEach(CoachStyle.allCases) { c in Text(c.label).tag(c.rawValue) }
                         }
                         .pickerStyle(.segmented)
-                        LabeledContent("Using", value: SpeechService.shared.resolvedVoiceDescription)
+                        if coachStyle == CoachStyle.system.rawValue {
+                            Picker("Accent", selection: $voiceAccent) {
+                                ForEach(VoiceAccent.allCases) { a in
+                                    Text("\(a.flag)  \(a.label)").tag(a.rawValue)
+                                }
+                            }
+                            Picker("Voice", selection: $voiceGender) {
+                                ForEach(VoiceGender.allCases) { g in
+                                    Text(g.label).tag(g.rawValue)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            LabeledContent("Using", value: SpeechService.shared.resolvedVoiceDescription)
+                        }
                         Button {
                             SpeechService.shared.preview()
                         } label: {
@@ -65,7 +72,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Tracking")
                 } footer: {
-                    Text("GPS maps your route and measures distance for runs and rides — only while a session is running, and routes stay on your device. Voice announces each \(unitRaw == UnitSystem.imperial.rawValue ? "mile" : "kilometer"), goals, and a finish recap. If \"Using\" shows \"compact\" — or not the accent/gender you picked — that voice isn't installed: add it (free, on-device) in iOS Settings ▸ Accessibility ▸ Spoken Content ▸ Voices ▸ English. RunKit always uses the highest-quality match installed.")
+                    Text("Voice announces each \(unitRaw == UnitSystem.imperial.rawValue ? "mile" : "kilometer"), goals, and a finish recap — all on your device. \"Natural\" is a bundled human-sounding coach (it falls back to \"System\" until its voice pack ships). For \"System\", if \"Using\" shows \"compact\" — or not the accent/gender you picked — that voice isn't installed: add it free in iOS Settings ▸ Accessibility ▸ Spoken Content ▸ Voices ▸ English. GPS is used only while a session runs; routes stay on your device.")
                 }
 
                 Section("Data") {

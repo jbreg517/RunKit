@@ -2,9 +2,14 @@
 
 > Option B from the voice research: replace robotic on-device TTS with
 > **pre-rendered audio clips** played back and stitched at runtime. Fully
-> on-device, no runtime network → keeps the privacy promise. Status: **design /
-> not built.** System `AVSpeechSynthesizer` ([SpeechService](../RunKit/Services/SpeechService.swift))
-> stays as the fallback.
+> on-device, no runtime network → keeps the privacy promise.
+>
+> **Status: B1 (plumbing) shipped in v0.11.** `VoiceCue` + `VoiceCoach` +
+> `VoiceScript` sequencer + `ClipVoiceCoach` (AVAudioEngine) are in, behind a
+> Settings "Coach voice: Natural / System" toggle. With no audio pack yet,
+> `ClipVoiceCoach` falls back to `SystemVoiceCoach` per cue, so behavior is
+> unchanged until B2 drops in the generated audio (see
+> [../tools/voicecues/README.md](../tools/voicecues/README.md)).
 
 ## Goal
 A signature, genuinely human-sounding coach that never depends on which system

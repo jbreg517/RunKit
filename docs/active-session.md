@@ -29,11 +29,14 @@
   (`en-US`/`en-GB`/`en-AU`) — and gender (female/male). Picks the highest-quality
   *installed* voice for that locale+gender (enhanced/premium if downloaded), with
   fallbacks. Defaults to British female. Settings has a **Preview voice** button.
-- Uses `AVSpeechSynthesizer` with a `.playback`/`.duckOthers` audio session, so it
-  ducks music and works screen-locked (target declares the `audio` background
-  mode). The finish recap uses `announceFinal`, which releases the audio session
-  only after speaking finishes (so it isn't cut off). Toggle: Settings ▸ Tracking ▸
-  "Voice coaching".
+- Uses a `.playback`/`.duckOthers` audio session, so it ducks music and works
+  screen-locked (target declares the `audio` background mode). The finish recap
+  releases the audio session only after speaking finishes (so it isn't cut off).
+  Toggle: Settings ▸ Tracking ▸ "Voice coaching".
+- **Coach engine (v0.11):** announcements are structured `VoiceCue`s rendered by a
+  `VoiceCoach` — `SystemVoiceCoach` (TTS) or `ClipVoiceCoach` (bundled audio pack,
+  option B). Settings ▸ Coach voice picks Natural vs System; Natural falls back to
+  System until the pack ships. See [voice-cue-pack.md](voice-cue-pack.md).
 
 ## Finish
 - `finalize()` resolves distance (GPS, with pedometer fallback for walk/run — see

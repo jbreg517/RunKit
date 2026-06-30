@@ -283,7 +283,7 @@ struct ActivitySessionView: View {
             if c <= 1 {
                 timer.invalidate()
                 withAnimation { countdown = nil }
-                if voiceOn { SpeechService.shared.announce("Go") }
+                if voiceOn { SpeechService.shared.speak(.go) }
                 beginActiveSession()
             } else {
                 withAnimation { countdown = c - 1 }
@@ -358,39 +358,17 @@ struct ActivitySessionView: View {
 
         if !goalAnnounced, goalTarget > 0, goalFraction() >= 1 {
             goalAnnounced = true
-            if voiceOn { SpeechService.shared.announce("\(Motivation.goal()) \(goalSpoken())") }
+            if voiceOn {
+                SpeechService.shared.speak(.goalReached(goalKind, target: goalTarget, unit: unit,
+                                                        motivationIndex: Motivation.goalIndex()))
+            }
         }
     }
 
     private func announceUnitMark(_ n: Int) {
-        guard voiceOn else { return }
-        let isRide = session?.type == .ride
-        let paceOrSpeed = isRide
-            ? unit.spokenSpeed(seconds: elapsed, meters: location.distanceMeters)
-            : unit.spokenPace(seconds: elapsed, meters: location.distanceMeters)
-        let label = isRide ? "Average speed" : "Average pace"
-        SpeechService.shared.announce(
-            "\(unit.spokenUnit.capitalized) \(n). Time \(spokenDuration(elapsed)). \(label) \(paceOrSpeed).")
-    }
-
-    private func goalSpoken() -> String {
-        switch goalKind {
-        case .distance: return "\(unit.spokenDistance(goalTarget)) reached."
-        case .time:     return "\(spokenDuration(goalTarget)) reached."
-        case .none:     return ""
-        }
-    }
-
-    /// Spoken end-of-run recap with a motivational sign-off.
-    private func finishRecap(for s: ActivitySession) -> String {
-        let duration = spokenDuration(s.activeSeconds)
-        guard s.distanceMeters > 50 else {
-            return "\(s.type.rawValue) complete. \(duration). \(Motivation.finish())"
-        }
-        let summary = s.type == .ride
-            ? "Average speed \(unit.spokenSpeed(seconds: s.activeSeconds, meters: s.distanceMeters))."
-            : "Average pace \(unit.spokenPace(seconds: s.activeSeconds, meters: s.distanceMeters))."
-        return "\(s.type.rawValue) complete. \(unit.spokenDistance(s.distanceMeters)) in \(duration). \(summary) \(Motivation.finish())"
+        guard voiceOn, let type = session?.type else { return }
+        SpeechService.shared.speak(.mark(unit: unit, type: type, index: n,
+                                         elapsed: elapsed, meters: location.distanceMeters))
     }
 
     private func finish() {
@@ -446,9 +424,11 @@ struct ActivitySessionView: View {
 
         // Spoken recap + motivation (releases the audio session when it finishes).
         if voiceOn {
-            SpeechService.shared.announceFinal(finishRecap(for: s))
+            SpeechService.shared.speakFinal(.finish(type: s.type, unit: unit, meters: s.distanceMeters,
+                                                    seconds: s.activeSeconds,
+                                                    motivationIndex: Motivation.finishIndex()))
         } else {
-            SpeechService.shared.endAudio()
+            SpeechService.shared.stop()
         }
 
         await HealthService.shared.save(s)
@@ -458,11 +438,5 @@ struct ActivitySessionView: View {
         let secs = Int(t)
         if secs >= 3600 { return String(format: "%d:%02d:%02d", secs / 3600, (secs % 3600) / 60, secs % 60) }
         return String(format: "%02d:%02d", secs / 60, secs % 60)
-    }
-
-    private func spokenDuration(_ t: TimeInterval) -> String {
-        let s = Int(t), m = s / 60, sec = s % 60
-        if m == 0 { return "\(sec) second\(sec == 1 ? "" : "s")" }
-        return "\(m) minute\(m == 1 ? "" : "s") \(sec) second\(sec == 1 ? "" : "s")"
     }
 }
