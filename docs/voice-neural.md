@@ -3,7 +3,12 @@
 > The path beyond option B. Concatenative clips plateau at "good"; full
 > human-likeness needs **end-to-end neural synthesis of each utterance**. The goal
 > is to do that **on the device** so the privacy promise (no runtime network,
-> "Data Not Collected") is untouched. Status: **research / not started.**
+> "Data Not Collected") is untouched.
+>
+> **Status: app-side scaffolding shipped in v0.12.** `NeuralVoiceCoach` +
+> `NeuralTTSEngine`/`CoreMLNeuralTTSEngine` are in, and the facade prefers neural →
+> clip pack → system under the "Natural" option. The model + Core ML conversion +
+> G2P remain (Mac-side) — see [../tools/voicemodel/README.md](../tools/voicemodel/README.md).
 
 ## Why this, not more of option B
 Google Assistant generates the whole sentence with one neural model → continuous,

@@ -49,11 +49,21 @@ final class SpeechService {
     static let shared = SpeechService()
     private let systemCoach = SystemVoiceCoach()
     private lazy var clipCoach = ClipVoiceCoach(fallback: systemCoach)
+    private lazy var neuralCoach = NeuralVoiceCoach(fallback: systemCoach)
 
     private var style: CoachStyle {
         CoachStyle(rawValue: UserDefaults.standard.string(forKey: "coachStyle") ?? "") ?? .system
     }
-    private var coach: VoiceCoach { style == .natural ? clipCoach : systemCoach }
+
+    /// "Natural" prefers the best available engine: on-device neural → bundled clip
+    /// pack → system voice. Each lights up automatically as it ships; today both
+    /// neural and clips are absent, so this falls through to the system voice.
+    private var coach: VoiceCoach {
+        guard style == .natural else { return systemCoach }
+        if neuralCoach.isAvailable { return neuralCoach }
+        if clipCoach.isPackInstalled { return clipCoach }
+        return systemCoach
+    }
 
     func speak(_ cue: VoiceCue)      { coach.speak(cue) }
     func speakFinal(_ cue: VoiceCue) { coach.speakFinal(cue) }
