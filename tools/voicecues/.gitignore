@@ -1,0 +1,6 @@
+# Voice-cue generation artifacts — never commit large model/audio intermediates.
+*.onnx
+*.bin
+*.wav
+out/
+__pycache__/

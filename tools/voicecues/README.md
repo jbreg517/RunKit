@@ -18,10 +18,16 @@ build-time cloud API), and `ffmpeg` is cross-platform. The app side
    `bf_emma` British female, `am_adam` American male). Swap the `synthesize()`
    function for any other model or a cloud API.
    ```
-   pip install kokoro soundfile numpy
-   winget install Gyan.FFmpeg      # or choco install ffmpeg
+   pip install kokoro-onnx soundfile imageio-ffmpeg
+   # one-time: download the model next to generate.py (gitignored) —
+   #   kokoro-v1.0.onnx + voices-v1.0.bin
+   #   from github.com/thewh1teagle/kokoro-onnx releases (tag model-files-v1.0)
    RK_VOICE=bf_emma python generate.py
+   # PowerShell: $env:RK_VOICE='bf_emma'; python generate.py
    ```
+   Uses `kokoro-onnx` (no PyTorch — installs cleanly on modern Python incl. 3.14;
+   the torch-based `kokoro` package can't build numpy on 3.14). `imageio-ffmpeg`
+   bundles ffmpeg, so no separate ffmpeg install is needed.
 3. **Bundle** — copy `out/*.m4a` into `RunKit/Resources/VoiceCues/` and
    `xcodegen generate`. `ClipVoiceCoach` finds them by id, `isPackInstalled`
    flips true, and "Natural" in Settings starts using them. Flip the default

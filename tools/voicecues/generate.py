@@ -28,14 +28,19 @@ OUT = "out"
 VOICE = os.environ.get("RK_VOICE", "bf_emma")   # bf_*/bm_* British, af_*/am_* American, etc.
 LANG = os.environ.get("RK_LANG", VOICE[0])      # 'b' British, 'a' American
 
-# --- TTS backend (swap this function for a different model / cloud API) --------
-from kokoro import KPipeline
-_pipeline = KPipeline(lang_code=LANG)
+# --- TTS backend: kokoro-onnx (no torch; installs cleanly on Python 3.14) -------
+# Needs the model files next to this script (gitignored; download from
+# https://github.com/thewh1teagle/kokoro-onnx releases, tag model-files-v1.0):
+#   kokoro-v1.0.onnx, voices-v1.0.bin
+# Swap this function for any other model or a build-time cloud API if preferred.
+from kokoro_onnx import Kokoro
+_KLANG = "en-gb" if LANG == "b" else "en-us"
+_kokoro = Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
 
 def synthesize(text: str) -> np.ndarray:
     """Return a mono float32 waveform at SR for `text`."""
-    chunks = [audio for _, _, audio in _pipeline(text, voice=VOICE)]
-    return np.concatenate(chunks).astype(np.float32)
+    samples, _sr = _kokoro.create(text, voice=VOICE, speed=1.0, lang=_KLANG)
+    return np.asarray(samples, dtype=np.float32).flatten()
 
 # --- post-processing -----------------------------------------------------------
 def trim_silence(audio: np.ndarray, thresh: float = 0.01, pad_s: float = 0.02) -> np.ndarray:
@@ -49,9 +54,21 @@ def normalize_peak(audio: np.ndarray, peak: float = 0.97) -> np.ndarray:
     m = float(np.max(np.abs(audio))) or 1.0
     return audio * (peak / m)
 
+def _ffmpeg_exe() -> str:
+    from shutil import which
+    if which("ffmpeg"):
+        return "ffmpeg"
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()   # downloads a static binary on first use
+    except Exception:
+        return "ffmpeg"
+
+_FFMPEG = _ffmpeg_exe()
+
 def encode_m4a(wav_path: str, m4a_path: str) -> None:
     subprocess.run(
-        ["ffmpeg", "-y", "-i", wav_path, "-c:a", "aac", "-b:a", "48k", "-ac", "1", m4a_path],
+        [_FFMPEG, "-y", "-i", wav_path, "-c:a", "aac", "-b:a", "48k", "-ac", "1", "-ar", str(SR), m4a_path],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
 

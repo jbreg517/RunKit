@@ -4,12 +4,12 @@
 > **pre-rendered audio clips** played back and stitched at runtime. Fully
 > on-device, no runtime network → keeps the privacy promise.
 >
-> **Status: B1 (plumbing) shipped in v0.11.** `VoiceCue` + `VoiceCoach` +
-> `VoiceScript` sequencer + `ClipVoiceCoach` (AVAudioEngine) are in, behind a
-> Settings "Coach voice: Natural / System" toggle. With no audio pack yet,
-> `ClipVoiceCoach` falls back to `SystemVoiceCoach` per cue, so behavior is
-> unchanged until B2 drops in the generated audio (see
-> [../tools/voicecues/README.md](../tools/voicecues/README.md)).
+> **Status: B1 plumbing (v0.11) + B2 pack (v0.13) shipped.** The 140-clip pack was
+> generated offline on Windows with Kokoro (`kokoro-onnx`, British female `bf_emma`,
+> ~0.9 MB) and bundled at `RunKit/Resources/VoiceCues/`. Selecting **Natural** in
+> Settings now plays the pack; the default is still **System** pending an on-device
+> audition. Regenerate or swap the voice via
+> [../tools/voicecues/README.md](../tools/voicecues/README.md).
 
 ## Goal
 A signature, genuinely human-sounding coach that never depends on which system
