@@ -5,8 +5,18 @@ const fs = require("fs");
 
 const m = {};
 
-// Numbers 0–99 (rendered in a neutral, non-final tone during generation).
-for (let i = 0; i <= 99; i++) m[`n_${i}`] = String(i);
+// Numbers 0–99 — spelled out so the neural TTS pronounces them naturally
+// (digits in isolation can be read oddly). The clip IDs stay `n_<value>`.
+const ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+  "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+  "eighteen", "nineteen"];
+const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+function words(n) {
+  if (n < 20) return ONES[n];
+  const t = Math.floor(n / 10), o = n % 10;
+  return o ? `${TENS[t]}-${ONES[o]}` : TENS[t];
+}
+for (let i = 0; i <= 99; i++) m[`n_${i}`] = words(i);
 
 // Units / connectives.
 Object.assign(m, {

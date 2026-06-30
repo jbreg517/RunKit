@@ -80,8 +80,12 @@ audio session + the `audio` background mode, so it still ducks music and works
 screen-locked. Decode the few needed clips lazily and cache the PCM buffers
 (announcements are infrequent — every km — so memory stays tiny).
 
-## How the audio gets made (build-time only — never at runtime)
-A dev-machine script renders the manifest → audio once, then we ship the files:
+## How the audio gets made (build-time only — never at runtime; no Mac needed)
+Because the comment set is fixed, the audio is generated **once, offline** — a
+neural TTS (e.g. Kokoro) runs locally on Windows and `ffmpeg` is cross-platform, so
+**no Mac/Core ML is involved**. See [../tools/voicecues/](../tools/voicecues/)
+(`build-manifest.js` + `generate.py`). A dev-machine script renders the manifest →
+audio once, then we ship the files:
 1. Read `manifest.json` (`id → text`).
 2. Render each line with the chosen voice (see decision below).
 3. Normalize loudness (~-16 LUFS), trim/standardize leading/trailing silence,

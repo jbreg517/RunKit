@@ -10,6 +10,16 @@
 > clip pack → system under the "Natural" option. The model + Core ML conversion +
 > G2P remain (Mac-side) — see [../tools/voicemodel/README.md](../tools/voicemodel/README.md).
 
+## ⚠️ Do you even need this? (Usually not)
+On-device real-time neural synthesis is only required to speak **arbitrary text
+not known until runtime**. RunKit's announcements are a **fixed, non-responsive
+comment set**, so you can pre-generate the audio offline with a great neural voice
+and ship files — **no Mac, no Core ML** (see
+[voice-cue-pack.md](voice-cue-pack.md) / [../tools/voicecues/](../tools/voicecues/)).
+That gets ~8/10 with far less work. This neural-on-device path only pays off if you
+later want to speak unbounded/dynamic text live (e.g. a coach that reacts to your
+splits in real time). The scaffolding below stays dormant until then.
+
 ## Why this, not more of option B
 Google Assistant generates the whole sentence with one neural model → continuous,
 contextual prosody. Concatenated clips glue fragments → pitch/rhythm break at every
