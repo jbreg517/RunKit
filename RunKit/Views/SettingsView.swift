@@ -54,6 +54,7 @@ struct SettingsView: View {
                             }
                         }
                         .pickerStyle(.segmented)
+                        LabeledContent("Using", value: SpeechService.shared.resolvedVoiceDescription)
                         Button {
                             SpeechService.shared.preview()
                         } label: {
@@ -64,7 +65,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Tracking")
                 } footer: {
-                    Text("GPS maps your route and measures distance for runs and rides — only while a session is running, and routes stay on your device. Voice announces each \(unitRaw == UnitSystem.imperial.rawValue ? "mile" : "kilometer"), goals, and a finish recap. For richer voices, download an enhanced voice in iOS Settings ▸ Accessibility ▸ Spoken Content ▸ Voices.")
+                    Text("GPS maps your route and measures distance for runs and rides — only while a session is running, and routes stay on your device. Voice announces each \(unitRaw == UnitSystem.imperial.rawValue ? "mile" : "kilometer"), goals, and a finish recap. If \"Using\" shows \"compact\" — or not the accent/gender you picked — that voice isn't installed: add it (free, on-device) in iOS Settings ▸ Accessibility ▸ Spoken Content ▸ Voices ▸ English. RunKit always uses the highest-quality match installed.")
                 }
 
                 Section("Data") {

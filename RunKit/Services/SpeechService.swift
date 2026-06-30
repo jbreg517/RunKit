@@ -83,15 +83,46 @@ final class SpeechService: NSObject, AVSpeechSynthesizerDelegate {
         VoiceGender(rawValue: UserDefaults.standard.string(forKey: "voiceGender") ?? "") ?? .female
     }
 
-    /// Best installed voice for the chosen accent + gender, preferring higher
-    /// quality (enhanced/premium if downloaded), with graceful fallbacks.
-    private func voice() -> AVSpeechSynthesisVoice? {
+    /// Resolves the best voice for the chosen accent + gender. Gender is honored
+    /// **strictly** — a wrong-gender voice is never returned. If the requested
+    /// accent has no voice of that gender installed, we keep the gender and fall
+    /// back to another English accent (and Settings nudges the user to download the
+    /// matching voice). Within each tier we prefer the highest quality, so a
+    /// downloaded enhanced/premium voice wins over the robotic compact one.
+    func resolvedVoice() -> AVSpeechSynthesisVoice? {
+        let want = gender.av
         let lang = accent.languageCode
-        let all = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == lang }
-        let matched = all.filter { $0.gender == gender.av }
-        let pool = matched.isEmpty ? all : matched
-        return pool.sorted { $0.quality.rawValue > $1.quality.rawValue }.first
-            ?? AVSpeechSynthesisVoice(language: lang)
+        let english = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("en") }
+        func best(_ vs: [AVSpeechSynthesisVoice]) -> AVSpeechSynthesisVoice? {
+            vs.sorted { $0.quality.rawValue > $1.quality.rawValue }.first
+        }
+        return best(english.filter { $0.language == lang && effectiveGender($0) == want }) // accent + gender
+            ?? best(english.filter { effectiveGender($0) == want })                        // gender, any accent
+            ?? best(english.filter { $0.language == lang })                                 // accent, any gender
+            ?? AVSpeechSynthesisVoice(language: lang)                                        // system default
+    }
+
+    /// `AVSpeechSynthesisVoice.gender` is often `.unspecified` for bundled voices,
+    /// so disambiguate the well-known ones by name.
+    private func effectiveGender(_ v: AVSpeechSynthesisVoice) -> AVSpeechSynthesisVoiceGender {
+        if v.gender != .unspecified { return v.gender }
+        let name = v.name.lowercased()
+        if Self.maleNames.contains(where: { name.contains($0) }) { return .male }
+        if Self.femaleNames.contains(where: { name.contains($0) }) { return .female }
+        return .unspecified
+    }
+
+    private static let femaleNames = ["samantha", "martha", "kate", "serena", "stephanie", "fiona",
+        "moira", "tessa", "karen", "catherine", "allison", "ava", "susan", "zoe", "nicky", "joelle", "sandy"]
+    private static let maleNames = ["daniel", "arthur", "oliver", "aaron", "fred", "albert", "junior",
+        "lee", "gordon", "rishi", "tom", "reed", "ralph", "rocko"]
+
+    /// What voice will actually be used, for display in Settings — so it's obvious
+    /// when the chosen accent/gender isn't installed (still robotic = compact).
+    var resolvedVoiceDescription: String {
+        guard let v = resolvedVoice() else { return "System default" }
+        let tier = v.quality == .premium ? "premium" : (v.quality == .enhanced ? "enhanced" : "compact")
+        return "\(v.name) · \(tier)"
     }
 
     private func beginAudio() {
@@ -103,7 +134,7 @@ final class SpeechService: NSObject, AVSpeechSynthesizerDelegate {
 
     private func utterance(_ text: String) -> AVSpeechUtterance {
         let u = AVSpeechUtterance(string: text)
-        u.voice = voice()
+        u.voice = resolvedVoice()
         u.rate = AVSpeechUtteranceDefaultSpeechRate
         u.postUtteranceDelay = 0.1
         return u

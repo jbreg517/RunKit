@@ -368,9 +368,9 @@ struct ActivitySessionView: View {
         let paceOrSpeed = isRide
             ? unit.spokenSpeed(seconds: elapsed, meters: location.distanceMeters)
             : unit.spokenPace(seconds: elapsed, meters: location.distanceMeters)
-        let label = isRide ? "average speed" : "average pace"
+        let label = isRide ? "Average speed" : "Average pace"
         SpeechService.shared.announce(
-            "\(unit.spokenUnit) \(n). Time \(spokenDuration(elapsed)). \(label) \(paceOrSpeed).")
+            "\(unit.spokenUnit.capitalized) \(n). Time \(spokenDuration(elapsed)). \(label) \(paceOrSpeed).")
     }
 
     private func goalSpoken() -> String {
