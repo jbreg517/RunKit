@@ -44,6 +44,34 @@ Assembled clips can sound choppy at number boundaries. Levers, cheapest first:
 - **Loudness match** — peak-normalize here; for tighter consistency use LUFS
   (`pip install pyloudnorm`).
 
+## Expressive engines (auditioned 2026-06)
+Kokoro is flat emotionally. Two shippable expressive alternatives were sampled:
+- **Chatterbox** (MIT) — emotion `exaggeration` + `cfg_weight` pacing knobs; voice
+  via cloning a reference clip. Samples: `chatterbox_samples.py` (emotion sweep,
+  `out/expressive/`), `chatterbox_voices.py` (accents via Kokoro refs from
+  `make_refs.py`, `out/voices/`). Venv: torch-based, Python 3.12.
+- **Parler-TTS mini v1** (Apache-2.0) — accent + emotion + pace described in a
+  natural-language prompt. Samples: `parler_samples.py` (`out/parler/`); interactive
+  experimentation: `parler_try.py` (`out/try/`, one-shot or loop, `--seed` for
+  repeatability).
+
+### Parler environment (persistent — do NOT put venvs in %TEMP%)
+Windows periodically cleans `%TEMP%`, which breaks venvs ("No Python at ...").
+The Parler venv lives at `%LOCALAPPDATA%\rk-tts\parler`. Recreate if needed:
+```powershell
+uv venv "$env:LOCALAPPDATA\rk-tts\parler" --python 3.12
+uv pip install --python "$env:LOCALAPPDATA\rk-tts\parler\Scripts\python.exe" `
+  "numba>=0.61" "llvmlite>=0.44" hf_transfer `
+  "git+https://github.com/huggingface/parler-tts.git" soundfile imageio-ffmpeg
+```
+(`numba`/`llvmlite` floors avoid a py≤3.9 source build; `hf_transfer` gets the
+3.5 GB model past a ~350 MB per-connection download cap seen on this network.)
+Run:
+```powershell
+cd tools\voicecues
+& "$env:LOCALAPPDATA\rk-tts\parler\Scripts\python.exe" parler_try.py
+```
+
 ## Notes
 - Until the pack ships, **Natural** transparently falls back to the system voice.
 - ~1–3 MB total. On-device real-time neural (Core ML, needs a Mac) is **not**
