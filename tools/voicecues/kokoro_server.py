@@ -42,29 +42,47 @@ def load_model():
         STATE["error"] = f"{type(e).__name__}: {e}"
 
 
-TAG_RE = re.compile(r"\[(pause|pitch|speed)\s*([+-]?\d*\.?\d+)\]", re.IGNORECASE)
+TAG_RE = re.compile(r"\[\s*(pause|pitch|speed|vol|voice)\s+([^\]]+?)\s*\]", re.IGNORECASE)
 
 
 def parse_script(text):
-    """Inline markup → segments. `[pause 0.5]` inserts exact silence; `[pitch +2]`
-    and `[speed 1.1]` apply to the text that FOLLOWS (until changed). Returns
-    [("silence", seconds) | ("speak", text, pitch_offset, speed_mult)]."""
-    segments, pos, cur_pitch, cur_speed = [], 0, 0.0, 1.0
-    for m in TAG_RE.finditer(text):
-        chunk = text[pos:m.start()].strip()
+    """Inline markup → segments. `[pause 0.5]` inserts exact silence. `[pitch +2]`,
+    `[speed 1.1]`, `[vol 1.3]`, `[voice bm_george]` apply to the text that FOLLOWS
+    (until changed); `[voice mix]` returns to the UI's A/B blend. Tags can sit
+    between single words, so the speaker can change word by word. Returns
+    [("silence", seconds) | ("speak", text, {pitch, speed, vol, voice})]."""
+    segments, pos = [], 0
+    cur = {"pitch": 0.0, "speed": 1.0, "vol": 1.0, "voice": None}
+
+    def emit(chunk):
+        chunk = chunk.strip()
         if chunk:
-            segments.append(("speak", chunk, cur_pitch, cur_speed))
-        tag, val = m.group(1).lower(), float(m.group(2))
+            segments.append(("speak", chunk, dict(cur)))
+
+    for m in TAG_RE.finditer(text):
+        emit(text[pos:m.start()])
+        tag, val = m.group(1).lower(), m.group(2).strip()
         if tag == "pause":
-            segments.append(("silence", min(3.0, max(0.05, val))))
-        elif tag == "pitch":
-            cur_pitch = min(6.0, max(-6.0, val))
-        elif tag == "speed":
-            cur_speed = min(1.5, max(0.5, val))
+            try:
+                segments.append(("silence", min(3.0, max(0.05, float(val)))))
+            except ValueError:
+                pass
+        elif tag == "voice":
+            cur["voice"] = None if val.lower() in ("mix", "default", "a") else val.lower()
+        else:
+            try:
+                v = float(val)
+            except ValueError:
+                v = None
+            if v is not None:
+                if tag == "pitch":
+                    cur["pitch"] = min(6.0, max(-6.0, v))
+                elif tag == "speed":
+                    cur["speed"] = min(1.5, max(0.5, v))
+                elif tag == "vol":
+                    cur["vol"] = min(2.0, max(0.3, v))
         pos = m.end()
-    tail = text[pos:].strip()
-    if tail:
-        segments.append(("speak", tail, cur_pitch, cur_speed))
+    emit(text[pos:])
     return segments
 
 
@@ -84,31 +102,48 @@ def pitch_shift(a, sr, semitones, ff):
     return out
 
 
+def edge_fade(a, sr):
+    """~8 ms linear fades so stitched fragments never click."""
+    import numpy as np
+    n = int(0.008 * sr)
+    if a.size > 2 * n:
+        a[:n] *= np.linspace(0, 1, n, dtype=np.float32)
+        a[-n:] *= np.linspace(1, 0, n, dtype=np.float32)
+    return a
+
+
 def synthesize(voice, voice2, blend, text, label, speed, pitch, lang):
     import numpy as np, soundfile as sf, imageio_ffmpeg
     # Blend two style vectors when a second voice is chosen (blend = % of A).
     if voice2 and blend < 100:
         w = blend / 100.0
-        style = (MODEL["styles"][voice] * w + MODEL["styles"][voice2] * (1 - w)).astype(np.float32)
+        mix_style = (MODEL["styles"][voice] * w + MODEL["styles"][voice2] * (1 - w)).astype(np.float32)
     else:
-        style = voice
-    if lang == "auto":
-        lang = "en-gb" if voice.startswith("b") else "en-us"
+        mix_style = voice
     ff = imageio_ffmpeg.get_ffmpeg_exe()
 
     sr = 24000
     pieces = []
-    for seg in parse_script(text) or [("speak", text, 0.0, 1.0)]:
+    for seg in parse_script(text) or [("speak", text, {"pitch": 0.0, "speed": 1.0, "vol": 1.0, "voice": None})]:
         if seg[0] == "silence":
             pieces.append(np.zeros(int(seg[1] * sr), dtype=np.float32))
             continue
-        _, seg_text, seg_pitch, seg_speed = seg
-        samples, sr = MODEL["kokoro"].create(seg_text, voice=style,
-                                             speed=min(1.5, max(0.5, speed * seg_speed)), lang=lang)
+        _, seg_text, st = seg
+        # per-segment voice override; "mix"/None = the UI's A/B blend
+        if st["voice"]:
+            if st["voice"] not in MODEL["voices"]:
+                raise ValueError(f"unknown [voice {st['voice']}] — see the dropdowns for valid names")
+            seg_style, base = st["voice"], st["voice"]
+        else:
+            seg_style, base = mix_style, voice
+        seg_lang = lang if lang != "auto" else ("en-gb" if base.startswith("b") else "en-us")
+        samples, sr = MODEL["kokoro"].create(seg_text, voice=seg_style,
+                                             speed=min(1.5, max(0.5, speed * st["speed"])), lang=seg_lang)
         a = np.asarray(samples, dtype=np.float32).flatten()
-        total_pitch = pitch + seg_pitch          # global knob + per-segment tag
+        total_pitch = pitch + st["pitch"]        # global knob + per-segment tag
         if abs(total_pitch) > 0.01:
             a = pitch_shift(a, sr, total_pitch, ff)
+        a = edge_fade(a * st["vol"], sr)
         pieces.append(a)
         pieces.append(np.zeros(int(0.06 * sr), dtype=np.float32))  # natural micro-gap
     a = np.concatenate(pieces) if pieces else np.zeros(1, dtype=np.float32)
@@ -175,9 +210,9 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <input id="blend" type="range" min="0" max="100" value="100" oninput="blendLabel()">
 <div class="hint">Mix two voices to sculpt timbre &mdash; e.g. 60% bf_emma + 40% af_heart softens the accent and warms the tone. Cross-gender mixes shift pitch character.</div>
 
-<label>Line to speak &mdash; inline tags: <code>[pause 0.5]</code> exact silence &middot; <code>[pitch +2]</code> / <code>[speed 1.1]</code> apply to what follows</label>
-<input id="text" placeholder="Nice work! [pause 0.4] [pitch +2] You're flying!" value="Kilometer three. [pause 0.5] Nice work! [pitch +2] You're flying!">
-<div class="hint">Punctuation still matters (! adds energy). Tags stitch separately-rendered fragments, so use them sparingly &mdash; one lift or one dramatic pause per line reads best.</div>
+<label>Line to speak &mdash; inline tags: <code>[pause 0.5]</code> silence &middot; <code>[pitch +2]</code> / <code>[speed 1.1]</code> / <code>[vol 1.3]</code> / <code>[voice bm_george]</code> apply to what follows &middot; <code>[voice mix]</code> = back to the A/B blend</label>
+<input id="text" placeholder="Nice work! [voice bm_george] Outstanding! [voice mix] [pitch +2] You're flying!" value="Kilometer three. [pause 0.5] Nice work! [voice bm_george] Outstanding! [voice mix] [pitch +2] You're flying!">
+<div class="hint">Punctuation still matters (! adds energy). Tags can sit between single words, so the speaker can change word by word &mdash; but every tag splits the line into separately-rendered fragments, so heavy tagging reads choppy. Voice names for <code>[voice &hellip;]</code> are the codes in the dropdowns (bf_emma, am_michael, &hellip;).</div>
 
 <div class="row">
   <div><label>Speed (0.7&ndash;1.3)</label><input id="speed" type="number" step="0.05" min="0.5" max="1.5" value="1.0"></div>
