@@ -42,6 +42,48 @@ def load_model():
         STATE["error"] = f"{type(e).__name__}: {e}"
 
 
+TAG_RE = re.compile(r"\[(pause|pitch|speed)\s*([+-]?\d*\.?\d+)\]", re.IGNORECASE)
+
+
+def parse_script(text):
+    """Inline markup → segments. `[pause 0.5]` inserts exact silence; `[pitch +2]`
+    and `[speed 1.1]` apply to the text that FOLLOWS (until changed). Returns
+    [("silence", seconds) | ("speak", text, pitch_offset, speed_mult)]."""
+    segments, pos, cur_pitch, cur_speed = [], 0, 0.0, 1.0
+    for m in TAG_RE.finditer(text):
+        chunk = text[pos:m.start()].strip()
+        if chunk:
+            segments.append(("speak", chunk, cur_pitch, cur_speed))
+        tag, val = m.group(1).lower(), float(m.group(2))
+        if tag == "pause":
+            segments.append(("silence", min(3.0, max(0.05, val))))
+        elif tag == "pitch":
+            cur_pitch = min(6.0, max(-6.0, val))
+        elif tag == "speed":
+            cur_speed = min(1.5, max(0.5, val))
+        pos = m.end()
+    tail = text[pos:].strip()
+    if tail:
+        segments.append(("speak", tail, cur_pitch, cur_speed))
+    return segments
+
+
+def pitch_shift(a, sr, semitones, ff):
+    """Shift pitch without changing duration (ffmpeg asetrate + atempo)."""
+    import numpy as np, soundfile as sf
+    factor = 2 ** (semitones / 12.0)
+    src = os.path.join(tempfile.gettempdir(), "rk_seg_in.wav")
+    dst = os.path.join(tempfile.gettempdir(), "rk_seg_out.wav")
+    sf.write(src, a, sr)
+    subprocess.run([ff, "-y", "-i", src,
+                    "-af", f"asetrate={int(sr * factor)},aresample={sr},atempo={1 / factor:.6f}",
+                    dst], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    out, _ = sf.read(dst, dtype="float32")
+    os.remove(src)
+    os.remove(dst)
+    return out
+
+
 def synthesize(voice, voice2, blend, text, label, speed, pitch, lang):
     import numpy as np, soundfile as sf, imageio_ffmpeg
     # Blend two style vectors when a second voice is chosen (blend = % of A).
@@ -52,20 +94,32 @@ def synthesize(voice, voice2, blend, text, label, speed, pitch, lang):
         style = voice
     if lang == "auto":
         lang = "en-gb" if voice.startswith("b") else "en-us"
-    samples, sr = MODEL["kokoro"].create(text, voice=style, speed=speed, lang=lang)
-    a = np.asarray(samples, dtype=np.float32).flatten()
+    ff = imageio_ffmpeg.get_ffmpeg_exe()
+
+    sr = 24000
+    pieces = []
+    for seg in parse_script(text) or [("speak", text, 0.0, 1.0)]:
+        if seg[0] == "silence":
+            pieces.append(np.zeros(int(seg[1] * sr), dtype=np.float32))
+            continue
+        _, seg_text, seg_pitch, seg_speed = seg
+        samples, sr = MODEL["kokoro"].create(seg_text, voice=style,
+                                             speed=min(1.5, max(0.5, speed * seg_speed)), lang=lang)
+        a = np.asarray(samples, dtype=np.float32).flatten()
+        total_pitch = pitch + seg_pitch          # global knob + per-segment tag
+        if abs(total_pitch) > 0.01:
+            a = pitch_shift(a, sr, total_pitch, ff)
+        pieces.append(a)
+        pieces.append(np.zeros(int(0.06 * sr), dtype=np.float32))  # natural micro-gap
+    a = np.concatenate(pieces) if pieces else np.zeros(1, dtype=np.float32)
     a = a / (float(np.max(np.abs(a))) or 1.0) * 0.89
+
     wav = os.path.join(tempfile.gettempdir(), "rk_kui.wav")
     sf.write(wav, a, sr)
     path = os.path.join(OUT, label + ".m4a")
-    ff = imageio_ffmpeg.get_ffmpeg_exe()
-    cmd = [ff, "-y", "-i", wav]
-    if abs(pitch) > 0.01:
-        # pitch shift without duration change: resample up/down + tempo-compensate
-        factor = 2 ** (pitch / 12.0)
-        cmd += ["-af", f"asetrate={int(sr * factor)},aresample={sr},atempo={1 / factor:.6f}"]
-    cmd += ["-ac", "1", "-ar", str(sr), "-c:a", "aac", "-b:a", "64k", path]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run([ff, "-y", "-i", wav, "-ac", "1", "-ar", str(sr),
+                    "-c:a", "aac", "-b:a", "64k", path],
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.remove(wav)
     return round(len(a) / sr, 1)
 
@@ -121,8 +175,9 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <input id="blend" type="range" min="0" max="100" value="100" oninput="blendLabel()">
 <div class="hint">Mix two voices to sculpt timbre &mdash; e.g. 60% bf_emma + 40% af_heart softens the accent and warms the tone. Cross-gender mixes shift pitch character.</div>
 
-<label>Line to speak (punctuation drives delivery: ! and &mdash; add energy and beats)</label>
-<input id="text" placeholder="Nice work! You're flying!" value="Kilometer three. Nice work! You're flying!">
+<label>Line to speak &mdash; inline tags: <code>[pause 0.5]</code> exact silence &middot; <code>[pitch +2]</code> / <code>[speed 1.1]</code> apply to what follows</label>
+<input id="text" placeholder="Nice work! [pause 0.4] [pitch +2] You're flying!" value="Kilometer three. [pause 0.5] Nice work! [pitch +2] You're flying!">
+<div class="hint">Punctuation still matters (! adds energy). Tags stitch separately-rendered fragments, so use them sparingly &mdash; one lift or one dramatic pause per line reads best.</div>
 
 <div class="row">
   <div><label>Speed (0.7&ndash;1.3)</label><input id="speed" type="number" step="0.05" min="0.5" max="1.5" value="1.0"></div>
