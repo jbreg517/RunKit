@@ -53,7 +53,10 @@ Kokoro is flat emotionally. Two shippable expressive alternatives were sampled:
 - **Parler-TTS mini v1** (Apache-2.0) — accent + emotion + pace described in a
   natural-language prompt. Samples: `parler_samples.py` (`out/parler/`); interactive
   experimentation: `parler_try.py` (`out/try/`, one-shot or loop, `--seed` for
-  repeatability).
+  repeatability), or the **web UI**: `parler_server.py [--port 8765]` — loads the
+  model once and stays warm; presets + description/line/label/seed form; clips
+  written to `out/try/<label>.m4a` (auto-suffixed, never overwrites) and playable
+  in-page. Stdlib HTTP only, binds 127.0.0.1 — nothing leaves the machine.
 
 ### Parler environment (persistent — do NOT put venvs in %TEMP%)
 Windows periodically cleans `%TEMP%`, which breaks venvs ("No Python at ...").
