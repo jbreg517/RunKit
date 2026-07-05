@@ -1,10 +1,14 @@
 """Local web UI for Kokoro voice sampling — named voices with reliable accents
 (bf_*/bm_* British, af_*/am_* American). Much faster than Parler on CPU and
-deterministic (no seed). Stdlib HTTP only.
+deterministic. Stdlib HTTP only.
 
     python kokoro_server.py [--port 8766]
 
-Needs kokoro-v1.0.onnx + voices-v1.0.bin next to this script (see README).
+Controls exposed (everything Kokoro actually has — it has NO emotion/mood param;
+mood comes from voice choice, blending, pacing, and line punctuation):
+  - Voice A + optional Voice B with a blend slider (style vectors are mixable)
+  - Speed (rate), Pitch shift in semitones (ffmpeg post-process)
+  - Dialect override (US/GB phonemization)
 Clips land in out/try/<label>.m4a alongside the Parler sampler's output.
 """
 import argparse, json, os, re, subprocess, tempfile, threading
@@ -31,26 +35,37 @@ def load_model():
         from kokoro_onnx import Kokoro
         MODEL["kokoro"] = Kokoro(os.path.join(HERE, "kokoro-v1.0.onnx"),
                                  os.path.join(HERE, "voices-v1.0.bin"))
-        names = sorted(np.load(os.path.join(HERE, "voices-v1.0.bin")).files)
-        MODEL["voices"] = [n for n in names if n[:1] in "ab"]
+        MODEL["styles"] = np.load(os.path.join(HERE, "voices-v1.0.bin"))
+        MODEL["voices"] = [n for n in sorted(MODEL["styles"].files) if n[:1] in "ab"]
         STATE["ready"] = True
     except Exception as e:
         STATE["error"] = f"{type(e).__name__}: {e}"
 
 
-def synthesize(voice, text, label, speed):
+def synthesize(voice, voice2, blend, text, label, speed, pitch, lang):
     import numpy as np, soundfile as sf, imageio_ffmpeg
-    lang = "en-gb" if voice.startswith("b") else "en-us"
-    samples, sr = MODEL["kokoro"].create(text, voice=voice, speed=speed, lang=lang)
+    # Blend two style vectors when a second voice is chosen (blend = % of A).
+    if voice2 and blend < 100:
+        w = blend / 100.0
+        style = (MODEL["styles"][voice] * w + MODEL["styles"][voice2] * (1 - w)).astype(np.float32)
+    else:
+        style = voice
+    if lang == "auto":
+        lang = "en-gb" if voice.startswith("b") else "en-us"
+    samples, sr = MODEL["kokoro"].create(text, voice=style, speed=speed, lang=lang)
     a = np.asarray(samples, dtype=np.float32).flatten()
     a = a / (float(np.max(np.abs(a))) or 1.0) * 0.89
     wav = os.path.join(tempfile.gettempdir(), "rk_kui.wav")
     sf.write(wav, a, sr)
     path = os.path.join(OUT, label + ".m4a")
     ff = imageio_ffmpeg.get_ffmpeg_exe()
-    subprocess.run([ff, "-y", "-i", wav, "-ac", "1", "-ar", str(sr),
-                    "-c:a", "aac", "-b:a", "64k", path],
-                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    cmd = [ff, "-y", "-i", wav]
+    if abs(pitch) > 0.01:
+        # pitch shift without duration change: resample up/down + tempo-compensate
+        factor = 2 ** (pitch / 12.0)
+        cmd += ["-af", f"asetrate={int(sr * factor)},aresample={sr},atempo={1 / factor:.6f}"]
+    cmd += ["-ac", "1", "-ar", str(sr), "-c:a", "aac", "-b:a", "64k", path]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.remove(wav)
     return round(len(a) / sr, 1)
 
@@ -75,7 +90,9 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
   label { display:block; margin: 10px 0 4px; font-size: .85em; color:#aaa; }
   input, select { width: 100%; box-sizing: border-box; background:#1c1c1e; color:#eee;
          border: 1px solid #333; border-radius: 8px; padding: 8px; font-size: .95em; }
+  input[type=range] { padding: 0; }
   .row { display: flex; gap: 10px; } .row > div { flex: 1; }
+  .hint { font-size: .75em; color: #777; margin-top: 2px; }
   button { background:#d4a843; color:#000; font-weight: 600; border: 0; border-radius: 8px;
          padding: 10px 18px; margin-top: 14px; cursor: pointer; font-size: 1em; }
   button:disabled { background:#555; color:#999; cursor: default; }
@@ -90,13 +107,34 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <h1>RunKit &mdash; Kokoro voice sampler</h1>
 <div id="status">Checking model status&hellip;</div>
 
-<label>Voice (accent is built into the voice)</label>
-<select id="voice"></select>
-<label>Line to speak</label>
-<input id="text" placeholder="Nice work! You're flying!" value="Nice work! You're flying!">
+<div class="row">
+  <div>
+    <label>Voice A</label>
+    <select id="voice"></select>
+  </div>
+  <div>
+    <label>Voice B (optional &mdash; blend for tone)</label>
+    <select id="voice2"><option value="">None</option></select>
+  </div>
+</div>
+<label>Blend: <span id="blendval">100</span>% A / <span id="blendval2">0</span>% B</label>
+<input id="blend" type="range" min="0" max="100" value="100" oninput="blendLabel()">
+<div class="hint">Mix two voices to sculpt timbre &mdash; e.g. 60% bf_emma + 40% af_heart softens the accent and warms the tone. Cross-gender mixes shift pitch character.</div>
+
+<label>Line to speak (punctuation drives delivery: ! and &mdash; add energy and beats)</label>
+<input id="text" placeholder="Nice work! You're flying!" value="Kilometer three. Nice work! You're flying!">
+
+<div class="row">
+  <div><label>Speed (0.7&ndash;1.3)</label><input id="speed" type="number" step="0.05" min="0.5" max="1.5" value="1.0"></div>
+  <div><label>Pitch (semitones, -4&hellip;+4)</label><input id="pitch" type="number" step="0.5" min="-6" max="6" value="0"></div>
+  <div><label>Dialect</label><select id="lang">
+    <option value="auto">Auto (from Voice A)</option>
+    <option value="en-us">American (en-us)</option>
+    <option value="en-gb">British (en-gb)</option>
+  </select></div>
+</div>
 <div class="row">
   <div><label>Label (file name)</label><input id="label" placeholder="take1"></div>
-  <div><label>Speed (0.7 slow &ndash; 1.3 fast)</label><input id="speed" type="number" step="0.05" min="0.5" max="1.5" value="1.0"></div>
 </div>
 <button id="go" onclick="generate()" disabled>Generate</button>
 
@@ -104,16 +142,24 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <div id="clips"></div>
 
 <script>
+function blendLabel() {
+  const v = document.getElementById('blend').value;
+  document.getElementById('blendval').textContent = v;
+  document.getElementById('blendval2').textContent = 100 - v;
+}
 async function poll() {
   try {
     const s = await (await fetch('/api/status')).json();
     const st = document.getElementById('status');
     if (s.error) { st.innerHTML = '<span class="err">Model failed to load: ' + s.error + '</span>'; return; }
     if (!s.ready) { st.textContent = 'Loading model…'; setTimeout(poll, 1500); return; }
-    if (s.voices && !document.getElementById('voice').options.length) {
-      const sel = document.getElementById('voice');
-      s.voices.forEach(v => { const o = document.createElement('option'); o.value = v.name; o.textContent = v.label; sel.appendChild(o); });
-      sel.value = 'bf_emma';
+    if (s.voices && document.getElementById('voice').options.length === 0) {
+      const a = document.getElementById('voice'), b = document.getElementById('voice2');
+      s.voices.forEach(v => {
+        const o = document.createElement('option'); o.value = v.name; o.textContent = v.label; a.appendChild(o);
+        const o2 = o.cloneNode(true); b.appendChild(o2);
+      });
+      a.value = 'bf_emma';
     }
     document.getElementById('go').disabled = s.busy;
     st.textContent = s.busy ? 'Generating…' : 'Ready.';
@@ -134,9 +180,13 @@ async function refreshClips() {
 async function generate() {
   const body = {
     voice: document.getElementById('voice').value,
+    voice2: document.getElementById('voice2').value,
+    blend: parseInt(document.getElementById('blend').value, 10),
     text: document.getElementById('text').value.trim(),
     label: document.getElementById('label').value.trim(),
-    speed: parseFloat(document.getElementById('speed').value) || 1.0
+    speed: parseFloat(document.getElementById('speed').value) || 1.0,
+    pitch: parseFloat(document.getElementById('pitch').value) || 0,
+    lang: document.getElementById('lang').value
   };
   if (!body.text) { alert('Enter a line to speak.'); return; }
   document.getElementById('go').disabled = true;
@@ -201,13 +251,20 @@ class Handler(BaseHTTPRequestHandler):
             req = json.loads(self.rfile.read(n) or b"{}")
             text = (req.get("text") or "").strip()
             voice = (req.get("voice") or "").strip()
+            voice2 = (req.get("voice2") or "").strip() or None
             if not text:
                 self._send(400, {"error": "text is required"})
                 return
             if voice not in MODEL["voices"]:
                 self._send(400, {"error": f"unknown voice {voice!r}"})
                 return
+            if voice2 is not None and voice2 not in MODEL["voices"]:
+                self._send(400, {"error": f"unknown voice2 {voice2!r}"})
+                return
+            blend = min(100, max(0, int(req.get("blend") or 100)))
             speed = min(1.5, max(0.5, float(req.get("speed") or 1.0)))
+            pitch = min(6.0, max(-6.0, float(req.get("pitch") or 0)))
+            lang = req.get("lang") if req.get("lang") in ("en-us", "en-gb") else "auto"
             label = re.sub(r"[^A-Za-z0-9_-]", "_", (req.get("label") or "").strip()) or f"kk_{voice}"
             final, i = label, 2
             while os.path.exists(os.path.join(OUT, final + ".m4a")):
@@ -216,7 +273,7 @@ class Handler(BaseHTTPRequestHandler):
             with GEN_LOCK:
                 STATE["busy"] = True
                 try:
-                    seconds = synthesize(voice, text, final, speed)
+                    seconds = synthesize(voice, voice2, blend, text, final, speed, pitch, lang)
                 finally:
                     STATE["busy"] = False
             self._send(200, {"file": final + ".m4a", "seconds": seconds})
