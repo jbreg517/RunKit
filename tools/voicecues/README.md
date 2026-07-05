@@ -57,6 +57,11 @@ Kokoro is flat emotionally. Two shippable expressive alternatives were sampled:
   model once and stays warm; presets + description/line/label/seed form; clips
   written to `out/try/<label>.m4a` (auto-suffixed, never overwrites) and playable
   in-page. Stdlib HTTP only, binds 127.0.0.1 — nothing leaves the machine.
+  Parler's prompt-described accents are unreliable in practice; for dependable
+  accents use the **Kokoro web UI**: `kokoro_server.py [--port 8766]` — same
+  form/output, but a dropdown of 28 named English voices (accent baked in:
+  `af_/am_` American, `bf_/bm_` British), a speed control, and near-instant
+  CPU generation. Deterministic, so no seed.
 
 ### Parler environment (persistent — do NOT put venvs in %TEMP%)
 Windows periodically cleans `%TEMP%`, which breaks venvs ("No Python at ...").
