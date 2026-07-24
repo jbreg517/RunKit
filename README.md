@@ -34,7 +34,7 @@ open RunKit.xcodeproj
 ## Conventions
 - `AppVersion.current` (in `RunKit/App/RunKitApp.swift`) is bumped +0.01 per push,
   matching LiftKit; CI derives the build number from the git commit count.
-- Bundle ID: `com.runkit.app` (placeholder until enrollment).
+- Bundle ID: `com.ferrixguild.runkit` (app) + `com.ferrixguild.runkit.widgets` (Live Activity extension).
 
 ## Status
 v0.01 — initial scaffold. Today dashboard, activity sessions, services and config

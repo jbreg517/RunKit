@@ -130,6 +130,6 @@ Benchmarked the privacy-first leaders (Pedometer++, StepsApp) against the heavie
 
 ## 8. Open decisions
 - Final app icon / accent (currently inherits LiftKit gold).
-- Bundle ID: `com.runkit.app` (placeholder, mirrors `com.liftkit.app`).
+- Bundle ID: `com.ferrixguild.runkit` (+ `com.ferrixguild.runkit.widgets`), under the Ferrixguild LLC org account (shared with LiftKit).
 - Whether widgets ship in v1.0 or v1.1 (leaning 1.1 to keep v1 lean).
 - When to extract the shared `KitUI` design package across LiftKit/RunKit/FuelKit.

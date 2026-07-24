@@ -100,7 +100,7 @@ workflows:
   #
   # ONE-TIME SETUP IN THE CODEMAGIC UI (cannot be done from this file):
   #   1. Apple Developer Program enrollment, then register BOTH App IDs at
-  #      developer.apple.com: `com.runkit.app` and `com.runkit.app.widgets`.
+  #      developer.apple.com: `com.ferrixguild.runkit` and `com.ferrixguild.runkit.widgets`.
   #      On the app's App ID enable HealthKit. (Live Activities need no App ID
   #      toggle — they're driven by NSSupportsLiveActivities in Info.plist,
   #      already set. Only add Push Notifications if we later want the Live
@@ -109,7 +109,7 @@ workflows:
   #      Connect API key (Issuer ID, Key ID, .p8). Name it EXACTLY the string
   #      used in `integrations:` below.
   #   3. Create the RunKit app record in App Store Connect (gives TestFlight a
-  #      target). Bundle ID = com.runkit.app.
+  #      target). Bundle ID = com.ferrixguild.runkit.
   #   4. Codemagic env-var GROUP named `signing` with a secure var
   #      CERTIFICATE_PRIVATE_KEY = a PEM RSA private key (openssl genrsa 2048).
   #      App Store Connect never returns a cert's private key, so CI must own one.
@@ -159,15 +159,15 @@ workflows:
           # keychain, then point the project at the fetched profiles.
           #
           # PREREQUISITE: both App IDs must already be registered at
-          # developer.apple.com, and `com.runkit.app` must have HealthKit
+          # developer.apple.com, and `com.ferrixguild.runkit` must have HealthKit
           # enabled — else the created profile won't carry that entitlement and
           # the build fails with a "doesn't include the … entitlement" error.
           keychain initialize
-          app-store-connect fetch-signing-files "com.runkit.app" \
+          app-store-connect fetch-signing-files "com.ferrixguild.runkit" \
             --type IOS_APP_STORE \
             --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
             --create
-          app-store-connect fetch-signing-files "com.runkit.app.widgets" \
+          app-store-connect fetch-signing-files "com.ferrixguild.runkit.widgets" \
             --type IOS_APP_STORE \
             --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
             --create
