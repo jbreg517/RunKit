@@ -447,6 +447,10 @@ struct ActivitySessionView: View {
             SpeechService.shared.speak(intReps <= 1 ? .intervalLast : .intervalWork(rep: 1, total: intReps))
         }
 
+        LiveActivityManager.shared.start(label: selectedType.rawValue, startDate: startDate ?? Date(),
+                                         distanceText: unit.distanceString(location.distanceMeters),
+                                         detail: liveDetail())
+
         let t = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in tick() }
         ticker = t
         RunLoop.main.add(t, forMode: .common)
@@ -521,6 +525,8 @@ struct ActivitySessionView: View {
         case .free:
             break
         }
+
+        if Int(elapsed) % 10 == 0 { pushLiveActivity() }
     }
 
     private func tickIntervals() {
@@ -529,6 +535,7 @@ struct ActivitySessionView: View {
             if intRep >= intReps {
                 intervalsDone = true
                 if voiceOn { SpeechService.shared.speak(.intervalsComplete) }
+                pushLiveActivity()
                 return
             }
             intPhaseIsWork = false
@@ -543,6 +550,28 @@ struct ActivitySessionView: View {
                                                              : .intervalWork(rep: intRep, total: intReps))
             }
         }
+        pushLiveActivity()
+    }
+
+    /// Live Activity detail line (right side of the island / lock screen).
+    private func liveDetail() -> String {
+        switch workoutType {
+        case .intervals:
+            return intervalsDone ? "Intervals done" : "\(intPhaseIsWork ? "WORK" : "REST") · \(intRep)/\(intReps)"
+        case .pace:
+            return "Target \(unit.paceString(secondsPerUnit: paceTargetSecPerMeter * unitMeters))"
+        case .distance:
+            return goalTarget > 0 ? "Goal \(unit.distanceString(goalTarget))" : ""
+        case .time:
+            return goalTarget > 0 ? "Goal \(timeString(goalTarget))" : ""
+        case .free:
+            return ""
+        }
+    }
+
+    private func pushLiveActivity() {
+        LiveActivityManager.shared.update(distanceText: unit.distanceString(location.distanceMeters),
+                                          detail: liveDetail())
     }
 
     private func tickPace() {
@@ -568,6 +597,7 @@ struct ActivitySessionView: View {
         ticker?.invalidate(); ticker = nil
         location.onPoint = nil
         location.stopTracking()
+        LiveActivityManager.shared.end()
 
         guard let s = session else { return }
         // Capture GPS results now (stable after stopTracking) and reset the UI
