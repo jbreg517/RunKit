@@ -105,14 +105,16 @@ workflows:
   #      toggle — they're driven by NSSupportsLiveActivities in Info.plist,
   #      already set. Only add Push Notifications if we later want the Live
   #      Activity updated by remote push; RunKit updates it locally, so skip.)
-  #   2. Codemagic > Integrations > "App Store Connect": upload an App Store
-  #      Connect API key (Issuer ID, Key ID, .p8). Name it EXACTLY the string
-  #      used in `integrations:` below.
+  #   2. App Store Connect API key: REUSE LiftKit's existing team-level
+  #      integration `liftkit app manager` (already referenced below) — no new
+  #      key needed. Just confirm its role reaches the new RunKit app record.
   #   3. Create the RunKit app record in App Store Connect (gives TestFlight a
   #      target). Bundle ID = com.ferrixguild.runkit.
-  #   4. Codemagic env-var GROUP named `signing` with a secure var
-  #      CERTIFICATE_PRIVATE_KEY = a PEM RSA private key (openssl genrsa 2048).
-  #      App Store Connect never returns a cert's private key, so CI must own one.
+  #   4. `signing` env-var group with CERTIFICATE_PRIVATE_KEY: REUSE the SAME PEM
+  #      key value LiftKit uses. Same key => fetch-signing-files reuses the one
+  #      Apple Distribution cert instead of minting a second (Apple caps certs).
+  #      If Codemagic groups are global to the team, RunKit sees `signing` as-is;
+  #      if app-scoped, recreate a `signing` group here with the identical value.
   #
   # Trigger: manual (no `triggering:` block) — runs only when started from the
   # Codemagic UI. Keeps it deliberate and saves build minutes.
@@ -122,7 +124,10 @@ workflows:
     max_build_duration: 60
 
     integrations:
-      app_store_connect: "runkit app manager"   # <-- must EXACTLY match the integration name in Codemagic UI
+      # Reuses the shared Ferrixguild App Store Connect API key already set up for
+      # LiftKit (team-level integration, covers all apps under the org). Same key
+      # => fetch-signing-files reuses the ONE Apple Distribution cert for the suite.
+      app_store_connect: "liftkit app manager"   # <-- must EXACTLY match the integration name in Codemagic UI
 
     environment:
       # App Store submissions must build with the iOS 26 SDK (required since
