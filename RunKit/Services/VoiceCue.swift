@@ -87,7 +87,7 @@ enum VoiceScript {
             return t
 
         case .sample:
-            return [line("sample", "Kilometer three. Nice work — you're flying.")]
+            return [line("sample", "Kilometer three. Good for you.")]
         }
     }
 
@@ -150,24 +150,25 @@ enum VoiceScript {
     }
 }
 
-/// Randomized motivation lines (indexed so the system and clip coaches agree).
+/// Short, deadpan quips (indexed so the system and clip coaches agree). Delivered
+/// by a flat/monotone voice, the dryness is the joke — non-intrusive by design.
 enum Motivation {
     static let goalLines = [
-        "Goal smashed! Outstanding.",
-        "You did it — that's a win.",
-        "Target hit. Unstoppable today.",
-        "Boom. Goal complete.",
-        "That's the one. Brilliant work.",
-        "Winged it all the way. Superb.",
+        "Yay.",
+        "Good for you.",
+        "Wow. A whole goal.",
+        "Incredible. Truly.",
+        "Look at you go.",
+        "Amazing. Anyway.",
     ]
     static let finishLines = [
-        "Strong finish — be proud of that one.",
-        "Nice work out there. Every step counted.",
-        "That's how it's done. Recover well.",
-        "Great effort. Mercury would be proud.",
-        "You showed up and crushed it.",
-        "Another one in the bank. Keep building.",
-        "Legs of the gods today. Well run.",
+        "You stopped. Bold move.",
+        "Well. That happened.",
+        "A workout. Sure.",
+        "Congratulations, I guess.",
+        "Neat.",
+        "Cool. Very cool.",
+        "Historic, honestly.",
     ]
     static func goalIndex() -> Int { Int.random(in: goalLines.indices) }
     static func finishIndex() -> Int { Int.random(in: finishLines.indices) }

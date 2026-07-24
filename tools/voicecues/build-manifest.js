@@ -35,25 +35,25 @@ Object.assign(m, {
 
 // Whole motivation phrases (must match Motivation in VoiceCue.swift).
 const goalLines = [
-  "Goal smashed! Outstanding.",
-  "You did it — that's a win.",
-  "Target hit. Unstoppable today.",
-  "Boom. Goal complete.",
-  "That's the one. Brilliant work.",
-  "Winged it all the way. Superb.",
+  "Yay.",
+  "Good for you.",
+  "Wow. A whole goal.",
+  "Incredible. Truly.",
+  "Look at you go.",
+  "Amazing. Anyway.",
 ];
 const finishLines = [
-  "Strong finish — be proud of that one.",
-  "Nice work out there. Every step counted.",
-  "That's how it's done. Recover well.",
-  "Great effort. Mercury would be proud.",
-  "You showed up and crushed it.",
-  "Another one in the bank. Keep building.",
-  "Legs of the gods today. Well run.",
+  "You stopped. Bold move.",
+  "Well. That happened.",
+  "A workout. Sure.",
+  "Congratulations, I guess.",
+  "Neat.",
+  "Cool. Very cool.",
+  "Historic, honestly.",
 ];
 goalLines.forEach((t, i) => (m[`goal_${i}`] = t));
 finishLines.forEach((t, i) => (m[`finish_${i}`] = t));
-m.sample = "Kilometer three. Nice work — you're flying.";
+m.sample = "Kilometer three. Good for you.";
 
 fs.writeFileSync("manifest.json", JSON.stringify(m, null, 2) + "\n");
 console.log(`wrote manifest.json with ${Object.keys(m).length} clips`);
