@@ -21,6 +21,12 @@ final class ActivitySession {
     /// Optional session goal: `"distance"` (meters) or `"time"` (seconds); nil = none.
     var goalKind: String?
     var goalTarget: Double = 0
+    /// Run type + structured params (added v0.15). Distance/Time reuse `goalTarget`.
+    var workoutTypeRaw: String = WorkoutType.free.rawValue
+    var intervalWork: Double = 0          // seconds
+    var intervalRest: Double = 0          // seconds
+    var intervalReps: Int = 0
+    var paceTargetSecPerMeter: Double = 0 // unit-agnostic target pace
     var notes: String?
 
     @Relationship(deleteRule: .cascade, inverse: \RoutePoint.session)
@@ -32,5 +38,6 @@ final class ActivitySession {
     }
 
     var type: ActivityType { ActivityType(rawValue: typeRaw) ?? .walk }
+    var workoutType: WorkoutType { WorkoutType(rawValue: workoutTypeRaw) ?? .free }
     var sortedRoute: [RoutePoint] { route.sorted { $0.timestamp < $1.timestamp } }
 }

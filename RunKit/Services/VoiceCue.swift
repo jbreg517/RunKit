@@ -4,12 +4,21 @@ import Foundation
 /// clip-based coach can map it to audio clips while the system coach renders it to
 /// a sentence. `motivationIndex` is chosen by the caller so both coaches use the
 /// same line.
+enum PaceCue { case faster, slower, onPace }
+
 enum VoiceCue {
     case go
     case mark(unit: UnitSystem, type: ActivityType, index: Int, elapsed: TimeInterval, meters: Double)
     case goalReached(GoalKind, target: Double, unit: UnitSystem, motivationIndex: Int)
     case finish(type: ActivityType, unit: UnitSystem, meters: Double, seconds: TimeInterval, motivationIndex: Int)
     case sample
+    // Structured run types (v0.15). No bundled clips yet → these fall back to the
+    // system voice, which is fine for functional cues.
+    case intervalWork(rep: Int, total: Int)
+    case intervalRest
+    case intervalLast
+    case intervalsComplete
+    case pace(PaceCue)
 }
 
 /// Strategy for speaking a cue. `SystemVoiceCoach` (AVSpeechSynthesizer) is the
@@ -85,6 +94,25 @@ enum VoiceScript {
             }
             t.append(line("finish_\(mi)", Motivation.finishLines[mi]))
             return t
+
+        case let .intervalWork(rep, total):
+            return [w("work_go", "Work!"), w("rep", "Rep"), n(rep), w("rep_of", "of"), n(total)]
+
+        case .intervalRest:
+            return [w("recover", "Recover.")]
+
+        case .intervalLast:
+            return [w("last_one", "Last one!")]
+
+        case .intervalsComplete:
+            return [w("intervals_done", "Intervals complete.")]
+
+        case let .pace(p):
+            switch p {
+            case .faster: return [w("pace_faster", "Pick it up.")]
+            case .slower: return [w("pace_slower", "Ease off.")]
+            case .onPace: return [w("pace_on", "On pace.")]
+            }
 
         case .sample:
             return [line("sample", "Kilometer three. Good for you.")]

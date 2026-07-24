@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 import CoreLocation
 
-/// Session goal chosen in setup.
+/// Goal semantics for the distance/time completion cue.
 enum GoalKind: String, CaseIterable, Identifiable {
     case none, distance, time
     var id: String { rawValue }
@@ -26,10 +26,14 @@ struct ActivitySessionView: View {
     @State private var location = LocationService.shared
     @State private var selectedType: ActivityType = .walk
 
-    // Goal setup
-    @State private var goalKind: GoalKind = .none
-    @State private var goalValueText = ""
-    @FocusState private var goalFieldFocused: Bool
+    // Run-type setup
+    @State private var workoutType: WorkoutType = .free
+    @State private var goalValueText = ""          // distance or time
+    @State private var intWorkText = "30"
+    @State private var intRestText = "90"
+    @State private var intRepsText = "8"
+    @State private var paceText = ""               // "mm:ss" per unit
+    @FocusState private var fieldFocused: Bool
 
     // Session lifecycle
     @State private var session: ActivitySession?
@@ -46,6 +50,19 @@ struct ActivitySessionView: View {
     @State private var goalAnnounced = false
     @State private var goalTarget: Double = 0          // meters or seconds
 
+    // Live interval state
+    @State private var intWork = 0.0
+    @State private var intRest = 0.0
+    @State private var intReps = 0
+    @State private var intPhaseIsWork = true
+    @State private var intRep = 1
+    @State private var phaseEndsAt: TimeInterval = 0
+    @State private var intervalsDone = false
+
+    // Live pace state
+    @State private var paceTargetSecPerMeter = 0.0
+    @State private var lastPaceNudge: TimeInterval = 0
+
     private var unitMeters: Double { unit == .metric ? 1000 : 1609.344 }
 
     var body: some View {
@@ -59,7 +76,7 @@ struct ActivitySessionView: View {
                     .padding(.vertical, RKSpacing.lg)
                     .readableWidth()
                     .contentShape(Rectangle())
-                    .onTapGesture { goalFieldFocused = false }
+                    .onTapGesture { fieldFocused = false }
                 }
                 .scrollDismissesKeyboard(.interactively)
                 if let c = countdown { countdownOverlay(c) }
@@ -68,7 +85,7 @@ struct ActivitySessionView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("Done") { goalFieldFocused = false }
+                    Button("Done") { fieldFocused = false }
                 }
             }
             .onAppear { consumePendingType() }
@@ -108,7 +125,7 @@ struct ActivitySessionView: View {
                     .padding(.horizontal, RKSpacing.md)
             }
 
-            goalSetup
+            workoutSetup
 
             Button("Start \(selectedType.rawValue)") { startCountdown() }
                 .buttonStyle(RKPrimaryButtonStyle())
@@ -116,28 +133,41 @@ struct ActivitySessionView: View {
         }
     }
 
-    private var goalSetup: some View {
+    private var workoutSetup: some View {
         VStack(alignment: .leading, spacing: RKSpacing.sm) {
-            Text("Goal").font(RKFont.heading).foregroundColor(RKColor.textPrimary)
-            Picker("Goal", selection: $goalKind) {
-                ForEach(GoalKind.allCases) { Text($0.label).tag($0) }
+            HStack {
+                Text("Run type").font(RKFont.heading).foregroundColor(RKColor.textPrimary)
+                Spacer()
+                Picker("Run type", selection: $workoutType) {
+                    ForEach(WorkoutType.allCases) { Label($0.label, systemImage: $0.sfSymbol).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .tint(RKColor.accent)
             }
-            .pickerStyle(.segmented)
-            if goalKind == .distance {
+
+            switch workoutType {
+            case .free:
+                Text("Open session — no target.")
+                    .font(RKFont.caption).foregroundColor(RKColor.textMuted)
+            case .distance:
                 HStack {
                     TextField("0.0", text: $goalValueText)
-                        .keyboardType(.decimalPad)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($goalFieldFocused)
+                        .keyboardType(.decimalPad).textFieldStyle(.roundedBorder).focused($fieldFocused)
                     Text(unit.distanceUnit).foregroundColor(RKColor.textSecondary)
                 }
-            } else if goalKind == .time {
+            case .time:
                 HStack {
                     TextField("0", text: $goalValueText)
-                        .keyboardType(.numberPad)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($goalFieldFocused)
+                        .keyboardType(.numberPad).textFieldStyle(.roundedBorder).focused($fieldFocused)
                     Text("min").foregroundColor(RKColor.textSecondary)
+                }
+            case .intervals:
+                intervalsSetup
+            case .pace:
+                HStack {
+                    TextField("5:30", text: $paceText)
+                        .keyboardType(.numbersAndPunctuation).textFieldStyle(.roundedBorder).focused($fieldFocused)
+                    Text("min \(unit.paceUnit)").foregroundColor(RKColor.textSecondary)
                 }
             }
         }
@@ -147,24 +177,110 @@ struct ActivitySessionView: View {
         .padding(.horizontal, RKSpacing.md)
     }
 
+    private var intervalsSetup: some View {
+        VStack(alignment: .leading, spacing: RKSpacing.sm) {
+            HStack(spacing: RKSpacing.sm) {
+                fieldBox("Work", $intWorkText, "sec")
+                fieldBox("Rest", $intRestText, "sec")
+                fieldBox("Reps", $intRepsText, "×")
+            }
+            HStack(spacing: RKSpacing.sm) {
+                ForEach(IntervalPreset.all) { p in
+                    Button(p.name) {
+                        intWorkText = "\(p.work)"; intRestText = "\(p.rest)"; intRepsText = "\(p.reps)"
+                    }
+                    .font(RKFont.caption)
+                    .padding(.horizontal, RKSpacing.sm).padding(.vertical, 6)
+                    .background(RKColor.surfaceElevated)
+                    .foregroundColor(RKColor.textPrimary)
+                    .cornerRadius(RKRadius.small)
+                }
+            }
+        }
+    }
+
+    private func fieldBox(_ label: String, _ text: Binding<String>, _ suffix: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(RKFont.caption).foregroundColor(RKColor.textMuted)
+            HStack(spacing: 3) {
+                TextField("0", text: text)
+                    .keyboardType(.numberPad).textFieldStyle(.roundedBorder).focused($fieldFocused)
+                Text(suffix).font(RKFont.caption).foregroundColor(RKColor.textSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     // MARK: Live
 
     private var live: some View {
         VStack(spacing: RKSpacing.lg) {
             if session?.usedGPS == true { mapCard }
+            if workoutType == .intervals { intervalBanner }
 
             Text(timeString(elapsed))
                 .font(.system(size: 60, weight: .black, design: .monospaced))
                 .foregroundColor(RKColor.textPrimary)
                 .contentTransition(.numericText())
 
+            if workoutType == .pace { paceBanner }
             metricsRow
-            if goalKind != .none { goalProgress }
+            if workoutType == .distance || workoutType == .time { goalProgress }
 
             Button("Finish") { finish() }
                 .buttonStyle(RKPrimaryButtonStyle())
                 .padding(.horizontal, RKSpacing.md)
         }
+    }
+
+    private var intervalBanner: some View {
+        let remaining = max(0, Int((phaseEndsAt - elapsed).rounded()))
+        return VStack(spacing: RKSpacing.xs) {
+            Text(intervalsDone ? "DONE" : (intPhaseIsWork ? "WORK" : "REST"))
+                .font(.system(size: 30, weight: .black))
+                .foregroundColor(intPhaseIsWork && !intervalsDone ? RKColor.accent : RKColor.textSecondary)
+            if !intervalsDone {
+                Text("Rep \(intRep) of \(intReps)  ·  \(remaining)s")
+                    .font(RKFont.caption).foregroundColor(RKColor.textMuted)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(RKSpacing.md)
+        .background((intPhaseIsWork && !intervalsDone) ? RKColor.accent.opacity(0.15) : RKColor.surface)
+        .cornerRadius(RKRadius.large)
+        .padding(.horizontal, RKSpacing.md)
+    }
+
+    private var paceBanner: some View {
+        let targetPerUnit = paceTargetSecPerMeter * unitMeters
+        let curPerUnit = displayedSpeedMps > 0.2 ? unitMeters / displayedSpeedMps : 0
+        let state: (String, Color) = {
+            guard curPerUnit > 0, targetPerUnit > 0 else { return ("—", RKColor.textMuted) }
+            let r = curPerUnit / targetPerUnit
+            if r > 1.08 { return ("Pick it up", RKColor.danger) }
+            if r < 0.92 { return ("Ease off", RKColor.accent) }
+            return ("On pace", RKColor.success)
+        }()
+        return VStack(alignment: .leading, spacing: RKSpacing.sm) {
+            HStack {
+                Text("Target").font(RKFont.caption).foregroundColor(RKColor.textMuted)
+                Spacer()
+                Text(unit.paceString(secondsPerUnit: targetPerUnit))
+                    .font(RKFont.bodyBold).foregroundColor(RKColor.textPrimary)
+            }
+            HStack {
+                Text("You").font(RKFont.caption).foregroundColor(RKColor.textMuted)
+                Spacer()
+                Text(curPerUnit > 0 ? unit.paceString(secondsPerUnit: curPerUnit) : "—")
+                    .font(RKFont.bodyBold).foregroundColor(state.1)
+            }
+            Text(state.0).font(RKFont.bodyBold).foregroundColor(state.1)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(RKSpacing.md)
+        .background(RKColor.surface)
+        .cornerRadius(RKRadius.large)
+        .padding(.horizontal, RKSpacing.md)
     }
 
     private var mapCard: some View {
@@ -260,15 +376,15 @@ struct ActivitySessionView: View {
 
     private func goalFraction() -> Double {
         guard goalTarget > 0 else { return 0 }
-        let value = goalKind == .distance ? location.distanceMeters : elapsed
+        let value = workoutType == .distance ? location.distanceMeters : elapsed
         return min(1, value / goalTarget)
     }
 
     private func goalLabel() -> String {
-        switch goalKind {
+        switch workoutType {
         case .distance: return "\(unit.distanceString(location.distanceMeters)) / \(unit.distanceString(goalTarget))"
         case .time:     return "\(timeString(elapsed)) / \(timeString(goalTarget))"
-        case .none:     return ""
+        default:        return ""
         }
     }
 
@@ -276,14 +392,15 @@ struct ActivitySessionView: View {
 
     /// 3-2-1 visual countdown, then the session begins.
     private func startCountdown() {
-        goalFieldFocused = false
+        fieldFocused = false
         withAnimation { countdown = 3 }
         let t = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
             guard let c = countdown else { timer.invalidate(); return }
             if c <= 1 {
                 timer.invalidate()
                 withAnimation { countdown = nil }
-                if voiceOn { SpeechService.shared.speak(.go) }
+                // Intervals announce "Work! Rep 1" themselves, so skip the generic "Go".
+                if voiceOn && workoutType != .intervals { SpeechService.shared.speak(.go) }
                 beginActiveSession()
             } else {
                 withAnimation { countdown = c - 1 }
@@ -295,9 +412,9 @@ struct ActivitySessionView: View {
     private func beginActiveSession() {
         let s = ActivitySession(type: selectedType)
         s.usedGPS = gpsEnabled
-        goalTarget = resolvedGoalTarget()
-        s.goalKind = goalKind == .none ? nil : goalKind.rawValue
-        s.goalTarget = goalTarget
+        s.workoutTypeRaw = workoutType.rawValue
+        resolveWorkoutParams(into: s)
+
         context.insert(s)
         session = s
         startDate = Date()
@@ -306,6 +423,7 @@ struct ActivitySessionView: View {
         lastPaceUpdate = 0
         announcedUnits = 0
         goalAnnounced = false
+        lastPaceNudge = 0
 
         if gpsEnabled {
             if location.authorization == .notDetermined { location.requestPermission() }
@@ -325,20 +443,52 @@ struct ActivitySessionView: View {
             location.startTracking()
         }
 
+        if workoutType == .intervals, voiceOn {
+            SpeechService.shared.speak(intReps <= 1 ? .intervalLast : .intervalWork(rep: 1, total: intReps))
+        }
+
         let t = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in tick() }
         ticker = t
         RunLoop.main.add(t, forMode: .common)
     }
 
-    private func resolvedGoalTarget() -> Double {
-        switch goalKind {
-        case .distance: return unit.meters(fromDisplay: goalValueText) ?? 0
-        case .time:     return (Double(goalValueText) ?? 0) * 60
-        case .none:     return 0
+    /// Reads the setup text fields into `@State` + the session's stored params.
+    private func resolveWorkoutParams(into s: ActivitySession) {
+        goalTarget = 0
+        switch workoutType {
+        case .free:
+            break
+        case .distance:
+            goalTarget = unit.meters(fromDisplay: goalValueText) ?? 0
+            s.goalKind = "distance"; s.goalTarget = goalTarget
+        case .time:
+            goalTarget = (Double(goalValueText) ?? 0) * 60
+            s.goalKind = "time"; s.goalTarget = goalTarget
+        case .intervals:
+            intWork = Double(max(1, Int(intWorkText) ?? 0))
+            intRest = Double(max(0, Int(intRestText) ?? 0))
+            intReps = max(1, Int(intRepsText) ?? 1)
+            intRep = 1; intPhaseIsWork = true; intervalsDone = false; phaseEndsAt = intWork
+            s.intervalWork = intWork; s.intervalRest = intRest; s.intervalReps = intReps
+        case .pace:
+            paceTargetSecPerMeter = parsePace(paceText)
+            s.paceTargetSecPerMeter = paceTargetSecPerMeter
         }
     }
 
-    /// Once-a-second update: timer, smoothed current pace (every 3s), voice marks.
+    /// "mm:ss" (or plain minutes) per unit → seconds per meter.
+    private func parsePace(_ s: String) -> Double {
+        let parts = s.split(separator: ":")
+        var perUnit = 0.0
+        if parts.count == 2, let m = Double(parts[0]), let sec = Double(parts[1]) {
+            perUnit = m * 60 + sec
+        } else if let m = Double(s.replacingOccurrences(of: ",", with: ".")) {
+            perUnit = m * 60
+        }
+        return perUnit > 0 ? perUnit / unitMeters : 0
+    }
+
+    /// Once-a-second update: timer, smoothed pace, unit marks, and run-type logic.
     private func tick() {
         guard let start = startDate else { return }
         elapsed = Date().timeIntervalSince(start)
@@ -356,12 +506,55 @@ struct ActivitySessionView: View {
             }
         }
 
-        if !goalAnnounced, goalTarget > 0, goalFraction() >= 1 {
-            goalAnnounced = true
-            if voiceOn {
-                SpeechService.shared.speak(.goalReached(goalKind, target: goalTarget, unit: unit,
-                                                        motivationIndex: Motivation.goalIndex()))
+        switch workoutType {
+        case .intervals: tickIntervals()
+        case .pace:      tickPace()
+        case .distance, .time:
+            if !goalAnnounced, goalTarget > 0, goalFraction() >= 1 {
+                goalAnnounced = true
+                if voiceOn {
+                    let gk: GoalKind = workoutType == .time ? .time : .distance
+                    SpeechService.shared.speak(.goalReached(gk, target: goalTarget, unit: unit,
+                                                            motivationIndex: Motivation.goalIndex()))
+                }
             }
+        case .free:
+            break
+        }
+    }
+
+    private func tickIntervals() {
+        guard !intervalsDone, elapsed >= phaseEndsAt else { return }
+        if intPhaseIsWork {
+            if intRep >= intReps {
+                intervalsDone = true
+                if voiceOn { SpeechService.shared.speak(.intervalsComplete) }
+                return
+            }
+            intPhaseIsWork = false
+            phaseEndsAt = elapsed + intRest
+            if voiceOn { SpeechService.shared.speak(.intervalRest) }
+        } else {
+            intRep += 1
+            intPhaseIsWork = true
+            phaseEndsAt = elapsed + intWork
+            if voiceOn {
+                SpeechService.shared.speak(intRep >= intReps ? .intervalLast
+                                                             : .intervalWork(rep: intRep, total: intReps))
+            }
+        }
+    }
+
+    private func tickPace() {
+        guard paceTargetSecPerMeter > 0, displayedSpeedMps > 0.4,
+              elapsed - lastPaceNudge >= 25 else { return }
+        let ratio = (1.0 / displayedSpeedMps) / paceTargetSecPerMeter   // >1 = slower than target
+        if ratio > 1.08 {
+            lastPaceNudge = elapsed
+            if voiceOn { SpeechService.shared.speak(.pace(.faster)) }
+        } else if ratio < 0.92 {
+            lastPaceNudge = elapsed
+            if voiceOn { SpeechService.shared.speak(.pace(.slower)) }
         }
     }
 
@@ -422,7 +615,7 @@ struct ActivitySessionView: View {
         s.activeEnergyKcal = HealthCalc.kcal(type: s.type, minutes: seconds / 60)
         try? context.save()
 
-        // Spoken recap + motivation (releases the audio session when it finishes).
+        // Spoken recap + quip (releases the audio session when it finishes).
         if voiceOn {
             SpeechService.shared.speakFinal(.finish(type: s.type, unit: unit, meters: s.distanceMeters,
                                                     seconds: s.activeSeconds,
