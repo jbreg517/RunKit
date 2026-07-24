@@ -1,7 +1,8 @@
 # RunKit — Requirements & Spec
 
-> Status: **v0.01 — initial scaffold.** Living document.
+> Status: **v0.20 — TestFlight beta prep.** Living document.
 > Platform: iOS 17+, SwiftUI + SwiftData. Built on Windows, archived via Codemagic.
+> Differentiation strategy lives in the companion doc **`DIFFERENTIATION.md`**.
 
 ---
 
@@ -53,6 +54,27 @@ Benchmarked the privacy-first leaders (Pedometer++, StepsApp) against the heavie
 - Accounts / login. Curated "explore routes/trails" content. In-app community.
 - Heavy multi-sport catalogs (20+ types). RunKit ships Walk/Run/Ride only in v1.
 
+### 3.1 Differentiation beyond privacy (full analysis in `DIFFERENTIATION.md`)
+
+Privacy-first is the floor, not the pitch — "private Strava" is a subtraction. The
+durable advantages are things the incumbents **structurally cannot copy**:
+
+1. **Suite HealthKit fusion (the moat).** RunKit + LiftKit + FuelKit share one
+   HealthKit bus, so RunKit can see your *strength* training and recovery signals.
+   Enables **recovery-aware scheduling** (the planning calendar reads yesterday's
+   LiftKit workout + HRV/resting HR/sleep and tunes the run). No single-app
+   competitor — Strava, Apple, Athlytic — can do this.
+2. **Coach with a personality.** The deadpan voice is a brand no one else has;
+   extend to **selectable personality packs** (Deadpan/Hype/Zen/Drill Sergeant)
+   over the existing on-device TTS pipeline.
+3. **Real training structure, free & offline.** The interval/pace engine already
+   ships; turn it into an **on-device training-plan generator** + a free
+   **structured-workout library** (C25K/tempo/fartlek/hill repeats) — no account,
+   no paywall, versus NRC/Strava.
+
+These map onto the two planned tentpoles (**planning calendar** + **Apple Watch**)
+in the roadmap below.
+
 ---
 
 ## 4. RunKit v1 scope
@@ -81,8 +103,13 @@ Benchmarked the privacy-first leaders (Pedometer++, StepsApp) against the heavie
 - About / Privacy / Disclaimer.
 
 ### 4.5 Explicitly deferred
+- **Intervals/structured workouts + audio/voice cues** — originally slated for v2,
+  but **shipped early** (v0.14–0.16): workout types free/distance/time/intervals/
+  pace with per-mode voice coaching and the deadpan personality. Left here for
+  history; see roadmap for what's next (personality packs, workout library).
 - **Apple Watch app + complications** → v2 (where cardio really belongs; on-wrist GPS + HR). Same stance as LiftKit.
-- Intervals/structured workouts, audio cues, advanced pace zones → v2.
+- **Planning calendar, training-plan generator, recovery-aware scheduling** → v2
+  differentiation tentpoles (see §3.1 / `DIFFERENTIATION.md`).
 - Premium tier (mirrors LiftKit's free/Plus split) → once v1 is stable.
 
 ---
@@ -122,9 +149,27 @@ Benchmarked the privacy-first leaders (Pedometer++, StepsApp) against the heavie
 
 ## 7. Roadmap
 
-- **v1.0** — Today dashboard, Walk/Run/Ride sessions with opt-in GPS + route, history/trends, HealthKit read/write, settings, on-device privacy.
-- **v1.1** — Widgets (home/lock), GPX/CSV export polish, StandBy.
-- **v2.0** — Apple Watch app + complications, intervals/structured sessions, premium tier, optional iCloud sync activation.
+- **Shipped (beta, v0.20)** — Today dashboard; Walk/Run/Ride sessions with opt-in
+  GPS + route + live pace; **structured workout types** (free/distance/time/
+  intervals/pace) with **per-mode voice coaching** and the **deadpan personality**;
+  **Live Activity / Dynamic Island** (time + distance, local); history/trends;
+  HealthKit read/write; settings; on-device privacy. *Ran ahead of the original
+  roadmap — intervals + voice were slated for v2.*
+- **v1.0 (App Store launch)** — harden the shipped surface; finalize icon + listing
+  (*RunKit: No-Login Run Tracker*); TestFlight → review. Keep lean.
+- **v1.1 (fast-follow, mostly cheap wins)** — Widgets (home/lock) + StandBy;
+  GPX/CSV export polish; **App Intents / Siri / Shortcuts + Automations**
+  ("start a RunKit run"); **coach personality packs** (Hype/Zen/Drill Sergeant);
+  **free structured-workout library** (C25K/tempo/fartlek/hill repeats);
+  **honest streaks** (respect rest days, no guilt); **map privacy zones**
+  (auto-blur start/end near home).
+- **v2.0 (differentiation tentpoles)** — **LiftKit-style planning calendar**;
+  **on-device training-plan generator** (goal + race date → week-by-week plan into
+  the calendar); **recovery-aware scheduling** via HealthKit fusion (reads LiftKit
+  workouts + HRV/resting HR/sleep to tune intensity — the moat, §3.1);
+  **readiness score** (HRV/resting HR, free vs. Athlytic/Gentler Streak);
+  **Apple Watch app + complications** (on-wrist GPS + HR); premium tier
+  (free/Plus split, mirrors LiftKit); optional iCloud sync activation.
 
 ---
 
