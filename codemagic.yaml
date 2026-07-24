@@ -96,42 +96,101 @@ workflows:
           failure: true
 
   # ---------------------------------------------------------------------------
-  # Signed TestFlight build — fill in once enrolled in the Apple Developer
-  # Program and an App Store Connect API key is added in the Codemagic UI
-  # (name it to match `integrations.app_store_connect`). Mirrors LiftKit.
+  # Signed App Store / TestFlight build. Mirrors LiftKit's proven workflow.
+  #
+  # ONE-TIME SETUP IN THE CODEMAGIC UI (cannot be done from this file):
+  #   1. Apple Developer Program enrollment, then register BOTH App IDs at
+  #      developer.apple.com: `com.runkit.app` and `com.runkit.app.widgets`.
+  #      On the app's App ID enable HealthKit. (Live Activities need no App ID
+  #      toggle — they're driven by NSSupportsLiveActivities in Info.plist,
+  #      already set. Only add Push Notifications if we later want the Live
+  #      Activity updated by remote push; RunKit updates it locally, so skip.)
+  #   2. Codemagic > Integrations > "App Store Connect": upload an App Store
+  #      Connect API key (Issuer ID, Key ID, .p8). Name it EXACTLY the string
+  #      used in `integrations:` below.
+  #   3. Create the RunKit app record in App Store Connect (gives TestFlight a
+  #      target). Bundle ID = com.runkit.app.
+  #   4. Codemagic env-var GROUP named `signing` with a secure var
+  #      CERTIFICATE_PRIVATE_KEY = a PEM RSA private key (openssl genrsa 2048).
+  #      App Store Connect never returns a cert's private key, so CI must own one.
+  #
+  # Trigger: manual (no `triggering:` block) — runs only when started from the
+  # Codemagic UI. Keeps it deliberate and saves build minutes.
   # ---------------------------------------------------------------------------
   ios-testflight:
     name: RunKit — TestFlight (signed)
     max_build_duration: 60
+
     integrations:
-      app_store_connect: RunKit App Store Connect
+      app_store_connect: "runkit app manager"   # <-- must EXACTLY match the integration name in Codemagic UI
+
     environment:
-      xcode: 16.2
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.runkit.app
+      # App Store submissions must build with the iOS 26 SDK (required since
+      # Apr 2026), so the signed workflow tracks the latest Xcode.
+      xcode: latest
+      groups:
+        - signing   # must define CERTIFICATE_PRIVATE_KEY (a distribution-cert private key)
+
     scripts:
-      - name: Install XcodeGen + generate project
+      - name: Install XcodeGen + set version, then generate project
         script: |
           set -eo pipefail
           which xcodegen || brew install xcodegen
           BUILD=$(git rev-list --count HEAD)
           VERSION=$(grep -oE 'static let current = "[0-9.]+"' RunKit/App/RunKitApp.swift | grep -oE '[0-9]+\.[0-9]+' | head -1)
+          [ -z "$VERSION" ] && VERSION="0.01"
+          echo "Version $VERSION, build $BUILD"
           /usr/bin/sed -i '' "s/MARKETING_VERSION: \"[0-9.]*\"/MARKETING_VERSION: \"$VERSION\"/" project.yml
           /usr/bin/sed -i '' "s/CURRENT_PROJECT_VERSION: \"[0-9]*\"/CURRENT_PROJECT_VERSION: \"$BUILD\"/" project.yml
           xcodegen generate
-      - name: Set up signing
-        script: xcode-project use-profiles
+          # Mirror version/build into both Info.plists (app + widget must match).
+          for PLIST in RunKit/Info.plist RunKitWidgets/Info.plist; do
+            [ -f "$PLIST" ] || continue
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$PLIST" 2>/dev/null || true
+            [ -n "$VERSION" ] && /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST" 2>/dev/null || true
+          done
+
+      - name: Set up code signing
+        script: |
+          set -eo pipefail
+          # Manual App Store signing via the app_store_connect API key. Fetch —
+          # creating if missing — an App Store profile + distribution cert for
+          # BOTH the app and the widget extension, add the cert to the build
+          # keychain, then point the project at the fetched profiles.
+          #
+          # PREREQUISITE: both App IDs must already be registered at
+          # developer.apple.com, and `com.runkit.app` must have HealthKit
+          # enabled — else the created profile won't carry that entitlement and
+          # the build fails with a "doesn't include the … entitlement" error.
+          keychain initialize
+          app-store-connect fetch-signing-files "com.runkit.app" \
+            --type IOS_APP_STORE \
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
+            --create
+          app-store-connect fetch-signing-files "com.runkit.app.widgets" \
+            --type IOS_APP_STORE \
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles
+
       - name: Build signed IPA
         script: |
           set -eo pipefail
-          xcode-project build-ipa --project RunKit.xcodeproj --scheme RunKit
+          xcode-project build-ipa \
+            --project RunKit.xcodeproj \
+            --scheme RunKit
+
     artifacts:
       - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_*.log
     publishing:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+        # To push straight to external testers, list beta group names here:
+        # beta_groups:
+        #   - "External Testers"
       email:
         recipients:
           - jbreg517@gmail.com
