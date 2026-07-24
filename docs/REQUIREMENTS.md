@@ -131,5 +131,6 @@ Benchmarked the privacy-first leaders (Pedometer++, StepsApp) against the heavie
 ## 8. Open decisions
 - Final app icon / accent (currently inherits LiftKit gold).
 - Bundle ID: `com.ferrixguild.runkit` (+ `com.ferrixguild.runkit.widgets`), under the Ferrixguild LLC org account (shared with LiftKit).
+- App Store **listing name**: `RunKit: No-Login Run Tracker` (bare "RunKit" collides with an existing running app; the descriptor also differentiates on privacy). Home-screen name (`CFBundleDisplayName`) stays plain `RunKit` — no uniqueness rule there. Subtitle field TBD (e.g. "Walk, run, ride — nothing tracked").
 - Whether widgets ship in v1.0 or v1.1 (leaning 1.1 to keep v1 lean).
 - When to extract the shared `KitUI` design package across LiftKit/RunKit/FuelKit.
