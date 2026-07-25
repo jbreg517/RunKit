@@ -19,6 +19,13 @@ struct TodayView: View {
     @State private var showBuilder = false
     @State private var showSchedule = false
     @State private var showLibrary = false
+    @State private var selectedDay: CalendarDay?
+
+    /// `sheet(item:)` needs an Identifiable, and `Date` isn't one.
+    private struct CalendarDay: Identifiable {
+        let date: Date
+        var id: TimeInterval { date.timeIntervalSince1970 }
+    }
 
     /// Scheduled runs due today, plus any carried forward from a missed day.
     private var dueRuns: [ScheduledRun] { scheduled.filter(\.isDue) }
@@ -47,7 +54,9 @@ struct TodayView: View {
                 VStack(spacing: RKSpacing.lg) {
                     startRunButton
                     todayRow
-                    ActivityCalendarView(sessions: sessions, scheduled: scheduled)
+                    ActivityCalendarView(sessions: sessions, scheduled: scheduled) { day in
+                        selectedDay = CalendarDay(date: day)
+                    }
                     dueSection
                     templatesSection
                     prebuiltSection
@@ -75,6 +84,12 @@ struct TodayView: View {
             }
             .sheet(isPresented: $showSchedule) {
                 ScheduleRunSheet(unit: unit)
+            }
+            .sheet(item: $selectedDay) { day in
+                DayDetailSheet(day: day.date, unit: unit,
+                               sessions: sessions, scheduled: scheduled) { run in
+                    router.startRun(PendingWorkout(scheduled: run))
+                }
             }
             .sheet(isPresented: $showLibrary) {
                 WorkoutLibraryView(unit: unit) { recipe in

@@ -8,6 +8,8 @@ import SwiftUI
 struct ActivityCalendarView: View {
     let sessions: [ActivitySession]
     var scheduled: [ScheduledRun] = []
+    /// Tapping a day opens its detail. Nil makes the grid display-only.
+    var onSelectDay: ((Date) -> Void)?
 
     @State private var month: Date = Calendar.current.startOfDay(for: Date())
 
@@ -70,7 +72,16 @@ struct ActivityCalendarView: View {
                         .foregroundColor(RKColor.textMuted)
                 }
                 ForEach(Array(cells.enumerated()), id: \.offset) { _, date in
-                    if let date { dayCell(date) } else { Color.clear.frame(height: 32) }
+                    if let date {
+                        if let onSelectDay {
+                            Button { onSelectDay(date) } label: { dayCell(date) }
+                                .buttonStyle(.plain)
+                        } else {
+                            dayCell(date)
+                        }
+                    } else {
+                        Color.clear.frame(height: 32)
+                    }
                 }
             }
 

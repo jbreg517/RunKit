@@ -8,6 +8,8 @@ import SwiftData
 /// training-plan generator, which emits these in bulk.
 struct ScheduleRunSheet: View {
     let unit: UnitSystem
+    /// Preselected day when opened from a calendar cell.
+    var initialDate: Date = Date()
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -75,6 +77,7 @@ struct ScheduleRunSheet: View {
             }
             .navigationTitle("Schedule a Run")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear { date = initialDate }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) {
