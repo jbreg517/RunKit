@@ -2,7 +2,8 @@
 
 > Status: **v0.24 — TestFlight beta prep.** Living document.
 > Platform: iOS 17+, SwiftUI + SwiftData. Built on Windows, archived via Codemagic.
-> Differentiation strategy lives in the companion doc **`DIFFERENTIATION.md`**.
+> Companion docs: **`ROADMAP.md`** (execution plan), **`DIFFERENTIATION.md`**
+> (competitive strategy), **`V2_DESIGN.md`** (v2 tentpole design).
 
 ---
 
