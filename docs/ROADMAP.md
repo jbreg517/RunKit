@@ -108,16 +108,18 @@ Design detail in `V2_DESIGN.md`. **Strictly ordered — each depends on the last
 
 | # | Item | Effort | Risk | Depends on |
 |---|---|---|---|---|
-| 3.1 | **Planning calendar** + `PlannedWorkout` model | L | Med | — |
-| 3.2 | Plan → session deep-link + completion matching | M | Med | 3.1 |
-| 3.3 | **Training-plan generator** (goal + race date → weeks) | L | Med | 3.1, 3.2, and 2.3's pace math |
+| 3.1 | **Planning calendar** + planned-workout model | L | Med | ✅ **Landed early (v0.31–0.33)** — month grid on Today (recorded = filled, planned = ringed), tappable days, `ScheduledRun` model, schedule sheet, due/carried-forward list |
+| 3.2 | Plan → session deep-link + completion matching | M | Med | ✅ **Landed early (v0.32)** — `PendingWorkout` carries a workout from any source into the session; finishing ticks its schedule complete |
+| 3.3 | **Training-plan generator** (goal + race date → weeks) | L | Med | ⬅️ **Next tentpole.** 3.1/3.2 done; needs 2.3's pace math. Emits `ScheduledRun`s in bulk |
 | 3.4 | **Readiness score** (HRV / RHR / sleep / load) | M | Med | New HealthKit read types |
 | 3.5 | **Recovery-aware scheduling** ← *the moat* | L | **High** | 3.1–3.4 + LiftKit data to test against |
 | 3.6 | **Apple Watch app** (on-wrist GPS + HR) | XL | **High** | New target + 3rd App ID/profile |
 | 3.7 | Premium tier (StoreKit, anonymous) | L | Med | Stable v1 |
 
 **Sequencing note:** 3.1–3.3 is the coherent "planning release" and could ship as
-**v1.5** without 3.4–3.5. The Watch (3.6) is independent of everything else — it
+**v1.5** without 3.4–3.5. **3.1 and 3.2 already landed** during the v0.31–0.33 UI
+work (Today was restructured to mirror LiftKit's home page), so the planning
+release is now just 3.3. The Watch (3.6) is independent of everything else — it
 can run in parallel or slip without blocking the moat.
 
 **Hard gate before 3.5:** it needs real LiftKit workouts in HealthKit to test

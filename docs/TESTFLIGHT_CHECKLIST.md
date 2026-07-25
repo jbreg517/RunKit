@@ -173,12 +173,65 @@ Set a target you can deliberately miss in both directions — e.g. **8:00 /km**.
 
 ---
 
-## M. Known gaps (do NOT file these)
+## N. Custom workouts  *(new v0.29–0.30)*
+
+Build: 2 min warm-up → 0.2 mi @ any pace → 2 min cool-down (short, so it's testable).
+
+- [ ] **N1** Run type → **Custom** → **Build workout** opens the builder.
+- [ ] **N2** Add/delete steps; drag to reorder; each step edits kind, basis, amount, pace.
+- [ ] **N3** Name it, **Save for reuse**, reopen → it's under Saved.
+- [ ] **N4** Start it → banner shows step 1, what's left of it, and what's next.
+- [ ] **N5** A **time** step advances on time; a **distance** step advances on distance.
+      *Why: each step ends on its own basis — the most likely place for a mix-up.*
+- [ ] **N6** Voice announces each step ("Warm up. 2 minutes").
+- [ ] **N7** Last step ends → "Workout complete", banner reads DONE, no wrap to step 1.
+- [ ] **N8** Live Activity shows the current step and position.
+- [ ] **N9** Finish → session detail lists the steps that were run.
+- [ ] **N10** Edit the saved workout afterwards → **history still shows the old steps**.
+      *Why: sessions snapshot what ran; edits must not rewrite history.*
+
+### GPS guard
+- [ ] **N11** GPS off + **Ride** + a distance target → Start is **disabled** with an explanation.
+- [ ] **N12** GPS off + **Walk** + distance target → allowed, warns distance is a step-count estimate.
+- [ ] **N13** GPS off walk, distance goal → **progress actually advances** and the goal completes.
+      *Why: before v0.30 this silently never completed.*
+
+---
+
+## O. Today page  *(rebuilt v0.31–0.33)*
+
+- [ ] **O1** Tab bar has **three** tabs — Activity is gone.
+- [ ] **O2** Gold **Start run** opens the session screen full-screen.
+- [ ] **O3** **Close** appears when idle; start a session → Close is gone and
+      swipe-down won't dismiss. *Why: dismissing mid-run would discard the session.*
+- [ ] **O4** History → a session → **Do Again** still opens the session screen.
+- [ ] **O5** Ring is left, distance/kcal/flights stacked right; 5-digit step counts don't clip.
+- [ ] **O6** Calendar: recorded days filled gold, today ringed, forward paging stops at this month.
+- [ ] **O7** **New workout** saves a template — and saves it **once**, not twice.
+- [ ] **O8** Tapping a template starts it with its steps preloaded.
+- [ ] **O9** **Prebuilt workouts** row scrolls; tapping one starts it preloaded;
+      **All workouts** opens the full library.
+- [ ] **O10** **Schedule** → pick date + workout → that day gets a **ring** on the calendar.
+- [ ] **O11** A schedule due today appears under **TODAY**; one from a past day shows
+      "Yesterday ·" / "N days ago ·".
+- [ ] **O12** Start a scheduled run and finish it → it stops appearing under TODAY and
+      shows complete in the day sheet.
+- [ ] **O13** Tap a calendar day → planned + recorded for that day; a future day offers
+      scheduling prefilled to that date.
+- [ ] **O14** Long-press a due run → **Skip this run** removes it.
+- [ ] **O15** Picking a workout from the **All workouts** sheet actually starts a session.
+      *Why: one modal opens as another dismisses — SwiftUI sometimes drops the second.*
+
+---
+
+## P. Known gaps (do NOT file these)
 
 Still open, scheduled in `ROADMAP.md`:
 
 - First-run/empty states and permission-denied copy are unpolished. *(1.4)*
 - No widgets, Siri, or personality packs yet. *(Phase 2)*
+- Scheduling is one run at a time — bulk plan generation is the next tentpole. *(3.3)*
+- You can't browse History mid-run (session screen is modal). Known trade-off.
 
 ---
 
@@ -190,4 +243,7 @@ For each failure note: **step number**, what happened, and whether it reproduces
 specific suspected defect: **C4, C7** (interval off-by-one / looping),
 **D6** (pace nagging at red lights), **E4, E7** (Live Activity ticking /
 stranded), **J4, J9** (pause distance + duration accounting), **K5, K6**
-(CSV quoting, GPX actually importing).
+(CSV quoting, GPX actually importing), **N5, N10** (per-step basis, history
+snapshot), **N13** (GPS-off distance goal — silently broken before v0.30),
+**O3** (losing a run by dismissing), **O7** (double-save), **O15**
+(modal-over-modal).
