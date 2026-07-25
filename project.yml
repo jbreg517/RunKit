@@ -9,7 +9,9 @@ settings:
   base:
     MARKETING_VERSION: "0.16"
     CURRENT_PROJECT_VERSION: "1"
-    DEVELOPMENT_TEAM: ""
+    # No DEVELOPMENT_TEAM here on purpose: an empty string is still a value and
+    # overrides what `xcode-project use-profiles` writes per target during the
+    # signed build. The unsigned build needs none (CODE_SIGNING_ALLOWED=NO).
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1,2"
 

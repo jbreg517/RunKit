@@ -181,10 +181,25 @@ workflows:
 
       - name: Build signed IPA
         script: |
-          set -eo pipefail
+          # NOTE: pipefail only (no `set -e`). `xcode-project build-ipa` prints
+          # "Failed to archive" and exits 65 without the underlying compiler or
+          # signing errors — with `set -e` the script aborts before we can dig
+          # them out of its log, leaving nothing to diagnose. Capture the exit
+          # code, then always surface the real errors.
+          set -o pipefail
           xcode-project build-ipa \
             --project RunKit.xcodeproj \
             --scheme RunKit
+          STATUS=$?
+          if [ "$STATUS" -ne 0 ]; then
+            echo "===== BUILD FAILED (status $STATUS) — real errors below ====="
+            for LOG in /tmp/xcodebuild_*.log; do
+              [ -f "$LOG" ] || continue
+              echo "----- $LOG -----"
+              grep -E "error:|Build FAILED|ARCHIVE FAILED|Undefined symbol|Provisioning|doesn't include|No profile|requires a provisioning" "$LOG" | tail -60
+            done
+            exit 1
+          fi
 
     artifacts:
       - build/ios/ipa/*.ipa
