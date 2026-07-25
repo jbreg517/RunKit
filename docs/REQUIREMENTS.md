@@ -1,6 +1,6 @@
 # RunKit — Requirements & Spec
 
-> Status: **v0.24 — TestFlight beta prep.** Living document.
+> Status: **v0.27 — on TestFlight.** Living document.
 > Platform: iOS 17+, SwiftUI + SwiftData. Built on Windows, archived via Codemagic.
 > Companion docs: **`ROADMAP.md`** (execution plan), **`DIFFERENTIATION.md`**
 > (competitive strategy), **`V2_DESIGN.md`** (v2 tentpole design).

@@ -122,18 +122,72 @@ Set a target you can deliberately miss in both directions — e.g. **8:00 /km**.
 
 ---
 
-## I. Known gaps (do NOT file these)
+## J. Pause / resume  *(new v0.27)*
 
-Confirmed missing, already scheduled in `ROADMAP.md` Phase 1:
+- [ ] **J1** Start a session → **Pause** appears beside Finish.
+- [ ] **J2** Tap Pause → timer stops, greys out, "PAUSED" shows.
+- [ ] **J3** Wait 30s → the timer has **not** advanced.
+- [ ] **J4** Walk 20 m while paused, then Resume → **distance did not increase**
+      for that stretch, and the route has no straight line across it.
+      *Why: resume drops `lastLocation` precisely so the paused stretch is
+      neither counted nor bridged.*
+- [ ] **J5** After resume the timer continues **from where it stopped**, not
+      from wall-clock start.
+- [ ] **J6** Pause/resume 3× → time stays consistent, no drift or jumps.
+- [ ] **J7** Pause during an **intervals** session → the rep countdown freezes
+      and resumes mid-rep, not restarting the rep.
+- [ ] **J8** While paused the Live Activity detail reads **"Paused"**.
+- [ ] **J9** Pause, then **Finish while still paused** → saved duration excludes
+      the paused time and looks right.
+- [ ] **J10** Paused with GPS on → no drift-distance accumulates while stationary.
 
-- **No pause/resume** — you cannot pause at a traffic light. *(1.1)*
-- **No export** — Settings has Clear All Data only. *(1.2)*
-- **No streaks.** *(1.3)*
+---
+
+## K. Export  *(new v0.27)*
+
+- [ ] **K1** Settings → Data → **Export My Data** is *disabled* with no sessions.
+- [ ] **K2** With sessions recorded, it enables; tapping opens the share sheet.
+- [ ] **K3** The set contains one **CSV** plus one **GPX per session with a route**.
+- [ ] **K4** Save to Files → open the CSV → header row plus one row per session,
+      values aligned to the right columns.
+- [ ] **K5** A session with a note containing a **comma** stays in one field.
+      *Why: RFC 4180 quoting — an unquoted comma would shift every later column.*
+- [ ] **K6** Email/AirDrop a GPX to yourself and import it somewhere that reads
+      GPX (Strava, Garmin, Gaia) → **the route renders correctly.**
+      *Why: this is the whole portability claim. If it doesn't import, it's broken.*
+- [ ] **K7** Export with ~20+ sessions → completes without a visible freeze.
+
+---
+
+## L. Streaks  *(new v0.27)*
+
+- [ ] **L1** Today tab shows the streak card.
+- [ ] **L2** With no history: "No streak yet" and "0 of 3 active days this week".
+- [ ] **L3** Record sessions on 3 separate days → card flips to
+      "This week's done — rest is training too."
+- [ ] **L4** Settings → **Active days a week** stepper (1–7) changes the target,
+      and the card updates.
+- [ ] **L5** Take a rest day → the streak **does not** reset.
+      *Why: this is the entire point — weekly, not daily.*
+- [ ] **L6** Nothing anywhere nags you to protect a streak.
+
+---
+
+## M. Known gaps (do NOT file these)
+
+Still open, scheduled in `ROADMAP.md`:
+
+- First-run/empty states and permission-denied copy are unpolished. *(1.4)*
+- No widgets, Siri, or personality packs yet. *(Phase 2)*
 
 ---
 
 ## Reporting
 
 For each failure note: **step number**, what happened, and whether it reproduces.
-Steps **C4, C7, D6, E4, E7** are the highest-value ones — they cover logic that
-can only fail at runtime, and each maps to a specific suspected defect.
+
+**Highest-value steps** — logic that can only fail at runtime, each mapping to a
+specific suspected defect: **C4, C7** (interval off-by-one / looping),
+**D6** (pace nagging at red lights), **E4, E7** (Live Activity ticking /
+stranded), **J4, J9** (pause distance + duration accounting), **K5, K6**
+(CSV quoting, GPX actually importing).

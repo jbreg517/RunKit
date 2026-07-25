@@ -2,7 +2,7 @@
 
 > The authoritative **work plan**. Companions: `REQUIREMENTS.md` (what the app is),
 > `DIFFERENTIATION.md` (why these features), `V2_DESIGN.md` (how the v2 tentpoles work).
-> Last updated at **v0.24**.
+> Last updated at **v0.27**.
 
 Effort scale: **S** ≤ half a session · **M** 1–2 · **L** 3–5 · **XL** 6+.
 Risk reflects *build-blind risk* — no Xcode on the dev machine, so everything is
@@ -35,9 +35,9 @@ is now a **device smoke test**, not a build fix.
 are *not implemented*. They're folded into Phase 1 below:
 | Gap | Spec ref | Status |
 |---|---|---|
-| Export (CSV/GPX) | §4.4 "Data management" | **Not built** — Settings has Clear All Data only |
-| Streaks | §3 table-stakes | **Not built** |
-| Pause / resume a session | *not specced* | **Not built** — `ActivitySession` even notes "sessions don't pause yet" |
+| Export (CSV/GPX) | §4.4 "Data management" | ✅ **Built v0.27** |
+| Streaks | §3 table-stakes | ✅ **Built v0.27** — weekly, rest-day aware |
+| Pause / resume a session | *not specced* | ✅ **Built v0.27** |
 
 ---
 
@@ -63,10 +63,10 @@ in Apple Health with its route.
 ### 1a. Close the spec gaps
 | # | Item | Effort | Risk | Why now |
 |---|---|---|---|---|
-| 1.1 | **Pause / resume** a session | M | Low | Table stakes — traffic lights, water stops. Needs `pausedSeconds` on the model + timer/GPS gating; `activeSeconds` already exists to hold the answer |
-| 1.2 | **Export CSV + GPX** | M | Low | Specced, unbuilt. **Load-bearing for positioning** — "your data is actually portable" is a core anti-Strava claim. GPX from `RoutePoint` is mechanical |
-| 1.3 | **Streaks** (rest-day aware) | S–M | Low | Specced. Build it *honest* from the start — see 2.5 |
-| 1.4 | Empty/first-run states, permission-denied copy | S | Low | Review-visible polish |
+| 1.1 | **Pause / resume** a session | M | Low | ✅ **v0.27** — `elapsed` subtracts paused time so intervals/goals/pace freeze for free; GPS suspends without resetting distance |
+| 1.2 | **Export CSV + GPX** | M | Low | ✅ **v0.27** — CSV session log + GPX 1.1 per route, via share sheet |
+| 1.3 | **Streaks** (rest-day aware) | S–M | Low | ✅ **v0.27** — weekly not daily; configurable target; no pressure copy |
+| 1.4 | Empty/first-run states, permission-denied copy | S | Low | ⬅️ **Remaining** — review-visible polish |
 
 ### 1b. Ship it
 | # | Item | Effort | Blocker |
