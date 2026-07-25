@@ -20,10 +20,16 @@ with per-mode voice coaching · deadpan clip-pack voice (140 clips) · Live
 Activity / Dynamic Island · 16-workout library · new app icon · signed
 TestFlight workflow wired to LiftKit's shared credentials.
 
-**⚠️ Verification debt — the single biggest risk.** Everything from **v0.15
-onward was written blind** (run types, Live Activity, workout library). The
-unsigned build passed at ~v0.14; **v0.15–v0.24 have never compiled.** Nothing
-below is safe to sequence until Phase 0 clears.
+**✅ Compile debt cleared.** v0.15–v0.25 were written blind, but the signed
+build succeeded and **shipped to TestFlight** — so everything compiles, the
+widget extension's second bundle ID signs correctly, and App Store Connect
+validation passes. The signing path (LiftKit's shared credentials + the two
+App IDs) is proven end-to-end.
+
+**⚠️ Still unverified: runtime behaviour.** Compiling is not working. The
+blind-built features have never been *exercised* — intervals state machine,
+pace nudges, Live Activity, workout library, voice cues in each mode. Phase 0
+is now a **device smoke test**, not a build fix.
 
 **⚠️ Spec gaps found in audit** — three items are in the v1 scope document but
 are *not implemented*. They're folded into Phase 1 below:
@@ -37,19 +43,18 @@ are *not implemented*. They're folded into Phase 1 below:
 
 ## Phase 0 — Verify and stabilize  *(blocks everything)*
 
-| # | Item | Effort | Risk |
+| # | Item | Effort | Status |
 |---|---|---|---|
-| 0.1 | Run unsigned Codemagic build on `master`; triage compile errors | S | — |
-| 0.2 | Fix fallout (expect: ActivityKit/widget target, `Binding` in picker, SwiftData schema) | S–M | Med |
-| 0.3 | Install via AltStore; smoke-test **intervals**, **pace**, **Live Activity**, **library**, **icon on device** | M | — |
-| 0.4 | Fix behavioural bugs found on device | M | Med |
+| 0.1 | Signed build compiles, signs, validates | S | ✅ **Done** — on TestFlight |
+| 0.2 | **Device smoke test** — see `TESTFLIGHT_CHECKLIST.md` | M | ⬅️ **Here** |
+| 0.3 | Fix behavioural bugs found on device | M | Blocked on 0.2 |
 
-**Acceptance:** a device build where you can run an interval session end-to-end,
-see the Live Activity in the Dynamic Island, pick a library workout, and have the
-session land in Apple Health.
+**Acceptance:** an interval session run end-to-end, Live Activity visible in the
+Dynamic Island, a library workout picked and completed, and the session landing
+in Apple Health with its route.
 
-> Do this **before** writing another feature. Five features deep on uncompiled
-> code is the expensive failure mode.
+> Do 0.2 **before** writing another feature. The failure mode now isn't compile
+> errors — it's a state-machine bug that only shows up at rep 7 of a real run.
 
 ---
 
