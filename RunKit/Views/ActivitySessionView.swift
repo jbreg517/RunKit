@@ -24,6 +24,31 @@ struct ActivitySessionView: View {
     private var unit: UnitSystem { UnitSystem(rawValue: unitRaw) ?? .metric }
 
     @State private var location = LocationService.shared
+    @State private var motion = MotionService.shared
+    /// Pedometer reading when the session began, so we can measure the delta.
+    @State private var motionStartMeters: Double = 0
+
+    /// Live distance for the running session. GPS when it's on; otherwise the
+    /// pedometer delta since the session started — which is the *expected*
+    /// source for a GPS-off walk/run, not a failure. Cycling has neither, so it
+    /// reports 0 (guarded in setup: a ride can't run distance targets w/o GPS).
+    private var sessionMeters: Double {
+        if session?.usedGPS == true { return location.distanceMeters }
+        guard selectedType.pedometerDistance else { return 0 }
+        return max(0, motion.distanceMeters - motionStartMeters)
+    }
+
+    /// True when the chosen setup measures progress by distance.
+    private var needsDistance: Bool {
+        workoutType == .distance
+            || (workoutType == .custom && steps.contains { $0.basis == .distance })
+    }
+
+    /// Cycling without GPS has no distance source at all, so a distance target
+    /// could never complete. Walk/run still work via the pedometer.
+    private var distanceUnavailable: Bool {
+        needsDistance && !gpsEnabled && !selectedType.pedometerDistance
+    }
     @State private var selectedType: ActivityType = .walk
 
     // Run-type setup
@@ -104,7 +129,12 @@ struct ActivitySessionView: View {
                     Button("Done") { fieldFocused = false }
                 }
             }
-            .onAppear { consumePendingType() }
+            .onAppear {
+                consumePendingType()
+                // Warm the pedometer so a GPS-off session has a live baseline to
+                // measure its distance delta against.
+                motion.startToday()
+            }
             .onChange(of: router.pendingActivityType) { _, _ in consumePendingType() }
             .task { await HealthService.shared.requestAuthorization() }
         }
@@ -143,12 +173,36 @@ struct ActivitySessionView: View {
 
             workoutSetup
 
+            if distanceUnavailable {
+                warning("A \(selectedType.rawValue.lowercased()) has no way to measure distance without GPS, so distance targets would never complete. Turn GPS on, or use time-based targets.")
+            } else if needsDistance && !gpsEnabled {
+                warning("GPS is off — distance comes from your step counter, so it's an estimate and there'll be no route map.")
+            }
+
             Button("Start \(selectedType.rawValue)") { startCountdown() }
                 .buttonStyle(RKPrimaryButtonStyle())
                 .padding(.horizontal, RKSpacing.md)
-                // A custom run with no steps would start and immediately finish.
-                .disabled(workoutType == .custom && steps.isEmpty)
+                // A custom run with no steps would start and immediately finish;
+                // a distance target with no distance source would never finish.
+                .disabled((workoutType == .custom && steps.isEmpty) || distanceUnavailable)
         }
+    }
+
+    /// Inline caution about a setup that can't measure what it needs.
+    private func warning(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: RKSpacing.sm) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(RKColor.accent)
+            Text(text)
+                .font(RKFont.caption)
+                .foregroundColor(RKColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(RKSpacing.md)
+        .background(RKColor.surface)
+        .cornerRadius(RKRadius.large)
+        .padding(.horizontal, RKSpacing.md)
     }
 
     private var workoutSetup: some View {
@@ -367,7 +421,7 @@ struct ActivitySessionView: View {
             case .time:
                 return timeString(max(0, step.seconds - (elapsed - stepStartElapsed)))
             case .distance:
-                let left = max(0, step.meters - (location.distanceMeters - stepStartMeters))
+                let left = max(0, step.meters - (sessionMeters - stepStartMeters))
                 return unit.distanceString(left)
             }
         }()
@@ -475,7 +529,7 @@ struct ActivitySessionView: View {
 
     private var metricsRow: some View {
         HStack(spacing: RKSpacing.md) {
-            metric(unit.distanceString(location.distanceMeters), "Distance")
+            metric(unit.distanceString(sessionMeters), "Distance")
             metric(currentPaceString, session?.type == .ride ? "Cur Speed" : "Cur Pace")
             metric(overallPaceString, session?.type == .ride ? "Avg Speed" : "Avg Pace")
         }
@@ -531,20 +585,20 @@ struct ActivitySessionView: View {
     }
 
     private var overallPaceString: String {
-        let d = location.distanceMeters
+        let d = sessionMeters
         if session?.type == .ride { return unit.speedString(seconds: elapsed, meters: d) }
         return unit.paceString(seconds: elapsed, meters: d)
     }
 
     private func goalFraction() -> Double {
         guard goalTarget > 0 else { return 0 }
-        let value = workoutType == .distance ? location.distanceMeters : elapsed
+        let value = workoutType == .distance ? sessionMeters : elapsed
         return min(1, value / goalTarget)
     }
 
     private func goalLabel() -> String {
         switch workoutType {
-        case .distance: return "\(unit.distanceString(location.distanceMeters)) / \(unit.distanceString(goalTarget))"
+        case .distance: return "\(unit.distanceString(sessionMeters)) / \(unit.distanceString(goalTarget))"
         case .time:     return "\(timeString(elapsed)) / \(timeString(goalTarget))"
         default:        return ""
         }
@@ -583,6 +637,10 @@ struct ActivitySessionView: View {
         elapsed = 0
         pausedAt = nil
         pausedTotal = 0
+        // Baseline the pedometer so `sessionMeters` can measure the delta when
+        // GPS is off. Updates were started in `onAppear`, so by the time the user
+        // has configured and started a session the reading is already live.
+        motionStartMeters = motion.distanceMeters
         displayedSpeedMps = 0
         lastPaceUpdate = 0
         announcedUnits = 0
@@ -615,7 +673,7 @@ struct ActivitySessionView: View {
         }
 
         LiveActivityManager.shared.start(label: selectedType.rawValue, startDate: startDate ?? Date(),
-                                         distanceText: unit.distanceString(location.distanceMeters),
+                                         distanceText: unit.distanceString(sessionMeters),
                                          detail: liveDetail())
 
         let t = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in tick() }
@@ -681,8 +739,8 @@ struct ActivitySessionView: View {
             lastPaceUpdate = elapsed
         }
 
-        if location.distanceMeters > 0 {
-            let units = Int(location.distanceMeters / unitMeters)
+        if sessionMeters > 0 {
+            let units = Int(sessionMeters / unitMeters)
             if units > announcedUnits {
                 announcedUnits = units
                 announceUnitMark(units)
@@ -754,7 +812,7 @@ struct ActivitySessionView: View {
     }
 
     private func pushLiveActivity() {
-        LiveActivityManager.shared.update(distanceText: unit.distanceString(location.distanceMeters),
+        LiveActivityManager.shared.update(distanceText: unit.distanceString(sessionMeters),
                                           detail: liveDetail())
     }
 
@@ -787,7 +845,7 @@ struct ActivitySessionView: View {
         let finished: Bool
         switch step.basis {
         case .time:     finished = elapsed - stepStartElapsed >= step.seconds
-        case .distance: finished = location.distanceMeters - stepStartMeters >= step.meters
+        case .distance: finished = sessionMeters - stepStartMeters >= step.meters
         }
 
         if finished {
@@ -800,7 +858,7 @@ struct ActivitySessionView: View {
     private func advanceStep() {
         stepIndex += 1
         stepStartElapsed = elapsed
-        stepStartMeters = location.distanceMeters
+        stepStartMeters = sessionMeters
         lastPaceNudge = elapsed          // don't nudge the instant a step starts
 
         guard stepIndex < steps.count else {
@@ -832,7 +890,7 @@ struct ActivitySessionView: View {
     private func announceUnitMark(_ n: Int) {
         guard voiceOn, let type = session?.type else { return }
         SpeechService.shared.speak(.mark(unit: unit, type: type, index: n,
-                                         elapsed: elapsed, meters: location.distanceMeters))
+                                         elapsed: elapsed, meters: sessionMeters))
     }
 
     /// Pause/resume. GPS is suspended too, so standing still doesn't accrue

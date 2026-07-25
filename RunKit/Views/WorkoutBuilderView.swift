@@ -48,7 +48,9 @@ struct WorkoutBuilderView: View {
                 } header: {
                     Text("Steps · \(totalText)")
                 } footer: {
-                    Text("Each step ends on its own time or distance. Drag to reorder, swipe to delete.")
+                    Text(steps.contains { $0.basis == .distance }
+                         ? "Each step ends on its own time or distance. Drag to reorder, swipe to delete.\n\nDistance steps need a distance source — GPS, or the step counter on a walk/run."
+                         : "Each step ends on its own time or distance. Drag to reorder, swipe to delete.")
                 }
 
                 Section("Save for reuse") {
