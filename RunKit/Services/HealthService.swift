@@ -10,9 +10,16 @@ final class HealthService {
     let store = HKHealthStore()
     var available: Bool { HKHealthStore.isHealthDataAvailable() }
 
+    /// Latest bodyweight (kg) read from Apple Health, cached so the synchronous
+    /// calorie math can use a real weight instead of a fixed assumption. Refreshed
+    /// by `refreshBodyweight()`.
+    private(set) var latestBodyweightKg: Double?
+
     private var readTypes: Set<HKObjectType> {
         var s = Set<HKObjectType>()
-        [.stepCount, .distanceWalkingRunning, .flightsClimbed, .activeEnergyBurned]
+        // bodyMass: shared across the suite (LiftKit / FuelKit log it) so runs get
+        // an accurate calorie burn.
+        [.stepCount, .distanceWalkingRunning, .flightsClimbed, .activeEnergyBurned, .bodyMass]
             .compactMap { HKObjectType.quantityType(forIdentifier: $0) }
             .forEach { s.insert($0) }
         return s
@@ -29,6 +36,33 @@ final class HealthService {
     func requestAuthorization() async {
         guard available else { return }
         try? await store.requestAuthorization(toShare: writeTypes, read: readTypes)
+        await refreshBodyweight()
+    }
+
+    /// Refreshes the cached bodyweight from Apple Health, falling back to the
+    /// suite-shared profile (an app may write it there without Health access).
+    /// Call at launch and before a session so calorie math uses a real weight.
+    func refreshBodyweight() async {
+        if let kg = await latestBodyMassKg() {
+            latestBodyweightKg = kg
+        } else if let lb = SuiteProfileStore.load()?.latestWeightLb, lb > 0 {
+            latestBodyweightKg = lb * 0.453592
+        }
+    }
+
+    /// Most-recent bodyweight in kilograms from Apple Health, or nil.
+    private func latestBodyMassKg() async -> Double? {
+        guard available, let type = HKQuantityType.quantityType(forIdentifier: .bodyMass) else { return nil }
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: type, predicate: nil)],
+            sortDescriptors: [SortDescriptor(\.endDate, order: .reverse)],
+            limit: 1)
+        do {
+            let samples = try await descriptor.result(for: store)
+            return samples.first?.quantity.doubleValue(for: .gramUnit(with: .kilo))
+        } catch {
+            return nil
+        }
     }
 
     /// Saves a finished session to Health via the workout builder, attaching the
@@ -120,11 +154,17 @@ final class HealthService {
     }
 }
 
-/// Rough on-device calorie math. Bodyweight isn't tracked in v1 (assume 70 kg);
-/// later this can read bodyweight from HealthKit.
+/// Rough on-device calorie math. Bodyweight comes from Apple Health (shared by
+/// the suite) when available, then the shared profile, then a 70 kg fallback.
 enum HealthCalc {
+    /// Best available bodyweight in kg for calorie estimates.
+    static func bodyweightKg() -> Double {
+        if let kg = HealthService.shared.latestBodyweightKg, kg > 0 { return kg }
+        if let lb = SuiteProfileStore.load()?.latestWeightLb, lb > 0 { return lb * 0.453592 }
+        return 70.0
+    }
+
     static func kcal(type: ActivityType, minutes: Double) -> Double {
-        let kg = 70.0
-        return type.met * kg * (minutes / 60.0)
+        type.met * bodyweightKg() * (minutes / 60.0)
     }
 }

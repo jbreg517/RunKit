@@ -29,7 +29,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>RunKit uses your location only while you’re recording a walk, run or ride, to map your route and measure distance. Routes stay on your device.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>RunKit reads your steps, distance and workouts from Apple Health to show accurate activity and history.</string>
+	<string>RunKit reads your steps, distance, workouts and bodyweight from Apple Health to show accurate activity, history and calorie estimates.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>RunKit saves your recorded walks, runs and rides to Apple Health, including distance and active energy.</string>
 	<key>UIBackgroundModes</key>
