@@ -10,19 +10,19 @@ final class AppRouter {
 
     var selectedTab: Tab = .today
 
-    /// Prefills the session screen's type; consumed there once.
-    var pendingActivityType: ActivityType?
+    /// Workout to preload into the session screen; consumed there once.
+    var pendingWorkout: PendingWorkout?
 
     /// Drives the Activity screen. Activity is no longer a tab — it's presented
     /// full-screen from the Start Run button (and from "Do Again"), so a running
     /// session owns the whole screen instead of competing with a tab bar.
     var showActivity = false
 
-    /// Present the session screen, optionally preselecting a type.
-    func startRun(_ type: ActivityType? = nil) {
-        pendingActivityType = type
+    /// Present the session screen, optionally preloaded with a workout.
+    func startRun(_ workout: PendingWorkout? = nil) {
+        pendingWorkout = workout
         showActivity = true
     }
 
-    func doAgain(_ type: ActivityType) { startRun(type) }
+    func doAgain(_ type: ActivityType) { startRun(PendingWorkout(type: type)) }
 }

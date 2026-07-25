@@ -68,6 +68,9 @@ struct ActivitySessionView: View {
     @State private var stepStartElapsed: TimeInterval = 0
     @State private var stepStartMeters: Double = 0
     @State private var stepsDone = false
+    /// Set when this session was launched from a scheduled run, so finishing it
+    /// marks that schedule complete.
+    @State private var activeScheduleID: UUID?
     /// Name of the picked `WorkoutRecipe`, shown until the params are edited.
     @State private var recipeName: String?
     @FocusState private var fieldFocused: Bool
@@ -139,21 +142,42 @@ struct ActivitySessionView: View {
             }
             .interactiveDismissDisabled(session != nil)
             .onAppear {
-                consumePendingType()
+                consumePendingWorkout()
                 // Warm the pedometer so a GPS-off session has a live baseline to
                 // measure its distance delta against.
                 motion.startToday()
             }
-            .onChange(of: router.pendingActivityType) { _, _ in consumePendingType() }
             .task { await HealthService.shared.requestAuthorization() }
         }
     }
 
-    /// Applies a type requested via History's "Do Again", once, when idle.
-    private func consumePendingType() {
-        guard session == nil, let type = router.pendingActivityType else { return }
-        selectedType = type
-        router.pendingActivityType = nil
+    /// Applies a workout queued by a template, prebuilt recipe, scheduled run or
+    /// History's "Do Again" — once, and only while idle.
+    private func consumePendingWorkout() {
+        guard session == nil, let p = router.pendingWorkout else { return }
+        router.pendingWorkout = nil
+
+        selectedType = p.activityType
+        workoutType = p.workoutType
+        activeScheduleID = p.scheduleID
+
+        switch p.workoutType {
+        case .distance:
+            let d = unit.distance(p.meters)
+            goalValueText = d == d.rounded() ? String(format: "%.0f", d) : String(format: "%.1f", d)
+        case .time:
+            goalValueText = "\(p.minutes)"
+        case .intervals:
+            intWorkText = "\(p.work)"
+            intRestText = "\(p.rest)"
+            intRepsText = "\(p.reps)"
+        case .custom:
+            steps = p.steps
+            customName = p.name
+        case .free, .pace:
+            break
+        }
+        recipeName = p.name.isEmpty ? nil : p.name
     }
 
     // MARK: Setup
@@ -957,6 +981,16 @@ struct ActivitySessionView: View {
         s.endedAt = end
         s.activeSeconds = seconds
         s.pausedSeconds = paused
+
+        // Tick off the scheduled run this session came from, if any.
+        if let id = activeScheduleID {
+            let match = FetchDescriptor<ScheduledRun>(predicate: #Predicate { $0.id == id })
+            if let sched = try? context.fetch(match).first {
+                sched.isCompleted = true
+                sched.completedAt = end
+            }
+            activeScheduleID = nil
+        }
 
         let ped = await MotionService.shared.pedometer(from: s.startedAt, to: end)
         if s.type.pedometerDistance, let steps = ped?.steps { s.steps = steps }

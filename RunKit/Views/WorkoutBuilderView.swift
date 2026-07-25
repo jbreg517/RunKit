@@ -6,7 +6,13 @@ import SwiftData
 /// duration or a distance, with an optional pace target.
 struct WorkoutBuilderView: View {
     let unit: UnitSystem
-    /// Called with the finished step list when the user starts it.
+    /// Label for the confirm button — "Use" when loading into a session, "Save"
+    /// when the caller stores the result as a template.
+    var primaryTitle: String = "Use"
+    /// Whether to offer saving from inside the sheet. Off where the caller
+    /// already persists what it receives, which would otherwise save twice.
+    var offersSave: Bool = true
+    /// Called with the finished step list and name.
     let onUse: ([WorkoutStep], String) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -53,10 +59,15 @@ struct WorkoutBuilderView: View {
                          : "Each step ends on its own time or distance. Drag to reorder, swipe to delete.")
                 }
 
-                Section("Save for reuse") {
-                    TextField("Workout name (optional)", text: $name)
-                    Button("Save workout") { save() }
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || steps.isEmpty)
+                Section("Name") {
+                    TextField("Workout name", text: $name)
+                }
+
+                if offersSave {
+                    Section {
+                        Button("Save for reuse") { save() }
+                            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || steps.isEmpty)
+                    }
                 }
 
                 if !saved.isEmpty {
@@ -84,7 +95,7 @@ struct WorkoutBuilderView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Use") {
+                    Button(primaryTitle) {
                         onUse(steps, name.trimmingCharacters(in: .whitespaces))
                         dismiss()
                     }

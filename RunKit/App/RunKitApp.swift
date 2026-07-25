@@ -4,7 +4,7 @@ import SwiftData
 /// Bumped +0.01 per push (shared convention with LiftKit). CI derives the build
 /// number from the git commit count.
 enum AppVersion {
-    static let current = "0.31"
+    static let current = "0.32"
 }
 
 @main
@@ -24,7 +24,8 @@ struct RunKitApp: App {
             RootTabView()
                 .preferredColorScheme(preferredScheme)
         }
-        .modelContainer(for: [ActivitySession.self, RoutePoint.self, CustomWorkout.self])
+        .modelContainer(for: [ActivitySession.self, RoutePoint.self,
+                              CustomWorkout.self, ScheduledRun.self])
     }
 }
 

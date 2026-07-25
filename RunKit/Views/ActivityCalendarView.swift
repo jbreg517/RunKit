@@ -7,6 +7,7 @@ import SwiftUI
 /// filled = completed). Kept deliberately simple until then.
 struct ActivityCalendarView: View {
     let sessions: [ActivitySession]
+    var scheduled: [ScheduledRun] = []
 
     @State private var month: Date = Calendar.current.startOfDay(for: Date())
 
@@ -15,6 +16,12 @@ struct ActivityCalendarView: View {
     /// Days with at least one session, keyed by start-of-day.
     private var activeDays: Set<Date> {
         Set(sessions.map { cal.startOfDay(for: $0.startedAt) })
+    }
+
+    /// Days with an outstanding scheduled run — drawn as a ring, so planned and
+    /// completed read differently at a glance.
+    private var plannedDays: Set<Date> {
+        Set(scheduled.filter { !$0.isCompleted }.map { cal.startOfDay(for: $0.date) })
     }
 
     /// Leading blanks to align the 1st under its weekday, then each day.
@@ -102,14 +109,17 @@ struct ActivityCalendarView: View {
         cal.isDate(month, equalTo: Date(), toGranularity: .month)
     }
 
+    /// Filled = recorded, ringed = planned, thin ring = today.
     private func dayCell(_ date: Date) -> some View {
         let day = cal.startOfDay(for: date)
         let active = activeDays.contains(day)
+        let planned = plannedDays.contains(day)
         let isToday = cal.isDateInToday(date)
+        let ring: Color = planned ? RKColor.accent : (isToday ? RKColor.accent.opacity(0.5) : .clear)
         return Text("\(cal.component(.day, from: date))")
             .font(RKFont.caption)
             .foregroundColor(active ? RKColor.onAccent
-                             : (isToday ? RKColor.accent : RKColor.textSecondary))
+                             : (planned || isToday ? RKColor.accent : RKColor.textSecondary))
             .frame(maxWidth: .infinity)
             .frame(height: 32)
             .background(
@@ -119,7 +129,7 @@ struct ActivityCalendarView: View {
             )
             .overlay(
                 Circle()
-                    .stroke(isToday && !active ? RKColor.accent : Color.clear, lineWidth: 1.5)
+                    .stroke(active ? .clear : ring, lineWidth: planned ? 2 : 1.5)
                     .frame(width: 32, height: 32)
             )
     }
