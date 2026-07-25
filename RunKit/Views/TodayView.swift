@@ -1,10 +1,19 @@
 import SwiftUI
+import SwiftData
 
 struct TodayView: View {
     @AppStorage("dailyStepGoal") private var goal = 8000
     @AppStorage("unitSystem") private var unitRaw = UnitSystem.metric.rawValue
+    @AppStorage("weeklyActiveTarget") private var weeklyTarget = 3
     private var unit: UnitSystem { UnitSystem(rawValue: unitRaw) ?? .metric }
     @State private var motion = MotionService.shared
+
+    @Query(sort: \ActivitySession.startedAt, order: .reverse)
+    private var sessions: [ActivitySession]
+
+    private var streak: StreakCalculator.Result {
+        StreakCalculator.compute(dates: sessions.map(\.startedAt), weeklyTarget: weeklyTarget)
+    }
 
     private var progress: Double {
         goal > 0 ? min(1, Double(motion.steps) / Double(goal)) : 0
@@ -17,6 +26,7 @@ struct TodayView: View {
                 VStack(spacing: RKSpacing.lg) {
                     ringCard
                     statsGrid
+                    streakCard
                     if !motion.available {
                         Text("Step tracking isn’t available on this device.")
                             .font(RKFont.caption)
@@ -31,6 +41,34 @@ struct TodayView: View {
             .background(RKColor.background.ignoresSafeArea())
             .onAppear { motion.startToday() }
         }
+    }
+
+    /// Weekly streak. Phrasing stays neutral whether or not the week is met —
+    /// no "don't break your streak!" pressure, no shaming when it resets.
+    private var streakCard: some View {
+        let s = streak
+        return HStack(spacing: RKSpacing.md) {
+            Image(systemName: s.weeks > 0 ? "flame.fill" : "flame")
+                .font(.title2)
+                .foregroundColor(s.weeks > 0 ? RKColor.accent : RKColor.textMuted)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(s.weeks > 0
+                     ? "\(s.weeks) week\(s.weeks == 1 ? "" : "s") in a row"
+                     : "No streak yet")
+                    .font(RKFont.bodyBold)
+                    .foregroundColor(RKColor.textPrimary)
+                Text(s.currentWeekMet
+                     ? "This week’s done — rest is training too."
+                     : "\(s.daysThisWeek) of \(s.target) active days this week")
+                    .font(RKFont.caption)
+                    .foregroundColor(RKColor.textMuted)
+            }
+            Spacer()
+        }
+        .padding(RKSpacing.md)
+        .background(RKColor.surface)
+        .cornerRadius(RKRadius.large)
+        .padding(.horizontal, RKSpacing.md)
     }
 
     private var ringCard: some View {

@@ -41,6 +41,11 @@ struct ActivitySessionView: View {
     // Session lifecycle
     @State private var session: ActivitySession?
     @State private var startDate: Date?
+    /// When the session was paused, and the running total of paused time.
+    /// `elapsed` subtracts `pausedTotal`, so every downstream consumer — the
+    /// interval state machine, goals, pace — freezes for free while paused.
+    @State private var pausedAt: Date?
+    @State private var pausedTotal: TimeInterval = 0
     @State private var elapsed: TimeInterval = 0
     @State private var ticker: Timer?
     @State private var countdown: Int?
@@ -271,18 +276,29 @@ struct ActivitySessionView: View {
             if session?.usedGPS == true { mapCard }
             if workoutType == .intervals { intervalBanner }
 
-            Text(timeString(elapsed))
-                .font(.system(size: 60, weight: .black, design: .monospaced))
-                .foregroundColor(RKColor.textPrimary)
-                .contentTransition(.numericText())
+            VStack(spacing: RKSpacing.xs) {
+                Text(timeString(elapsed))
+                    .font(.system(size: 60, weight: .black, design: .monospaced))
+                    .foregroundColor(pausedAt == nil ? RKColor.textPrimary : RKColor.textMuted)
+                    .contentTransition(.numericText())
+                if pausedAt != nil {
+                    Text("PAUSED")
+                        .font(RKFont.caption).bold()
+                        .foregroundColor(RKColor.accent)
+                }
+            }
 
             if workoutType == .pace { paceBanner }
             metricsRow
             if workoutType == .distance || workoutType == .time { goalProgress }
 
-            Button("Finish") { finish() }
-                .buttonStyle(RKPrimaryButtonStyle())
-                .padding(.horizontal, RKSpacing.md)
+            HStack(spacing: RKSpacing.sm) {
+                Button(pausedAt == nil ? "Pause" : "Resume") { togglePause() }
+                    .buttonStyle(RKSecondaryButtonStyle())
+                Button("Finish") { finish() }
+                    .buttonStyle(RKPrimaryButtonStyle())
+            }
+            .padding(.horizontal, RKSpacing.md)
         }
     }
 
@@ -472,6 +488,8 @@ struct ActivitySessionView: View {
         session = s
         startDate = Date()
         elapsed = 0
+        pausedAt = nil
+        pausedTotal = 0
         displayedSpeedMps = 0
         lastPaceUpdate = 0
         announcedUnits = 0
@@ -548,7 +566,10 @@ struct ActivitySessionView: View {
     /// Once-a-second update: timer, smoothed pace, unit marks, and run-type logic.
     private func tick() {
         guard let start = startDate else { return }
-        elapsed = Date().timeIntervalSince(start)
+        // Paused: freeze the clock. Everything keyed off `elapsed` (intervals,
+        // goals, pace nudges, unit marks) stops with it.
+        guard pausedAt == nil else { return }
+        elapsed = Date().timeIntervalSince(start) - pausedTotal
 
         if elapsed - lastPaceUpdate >= 3 {
             displayedSpeedMps = location.currentSpeedMps
@@ -608,6 +629,7 @@ struct ActivitySessionView: View {
 
     /// Live Activity detail line (right side of the island / lock screen).
     private func liveDetail() -> String {
+        if pausedAt != nil { return "Paused" }
         switch workoutType {
         case .intervals:
             return intervalsDone ? "Intervals done" : "\(intPhaseIsWork ? "WORK" : "REST") · \(intRep)/\(intReps)"
@@ -646,7 +668,28 @@ struct ActivitySessionView: View {
                                          elapsed: elapsed, meters: location.distanceMeters))
     }
 
+    /// Pause/resume. GPS is suspended too, so standing still doesn't accrue
+    /// drift-distance, and the route isn't bridged across the stop.
+    private func togglePause() {
+        if let since = pausedAt {
+            pausedTotal += Date().timeIntervalSince(since)
+            pausedAt = nil
+            if session?.usedGPS == true { location.resumeTracking() }
+            pushLiveActivity()
+        } else {
+            pausedAt = Date()
+            if session?.usedGPS == true { location.pauseTracking() }
+            pushLiveActivity()
+        }
+    }
+
     private func finish() {
+        // Finishing while paused: bank the final stretch so `pausedSeconds` is
+        // complete and `elapsed` isn't left short.
+        if let since = pausedAt {
+            pausedTotal += Date().timeIntervalSince(since)
+            pausedAt = nil
+        }
         ticker?.invalidate(); ticker = nil
         location.onPoint = nil
         location.stopTracking()
@@ -657,11 +700,14 @@ struct ActivitySessionView: View {
         // immediately; distance resolution may await a pedometer query.
         let end = Date()
         let seconds = elapsed
+        let paused = pausedTotal
         let gpsDistance = location.distanceMeters
         let hadGap = location.hadGap
         session = nil
         startDate = nil
-        Task { await finalize(s, end: end, seconds: seconds, gpsDistance: gpsDistance, hadGap: hadGap) }
+        pausedTotal = 0
+        Task { await finalize(s, end: end, seconds: seconds, paused: paused,
+                              gpsDistance: gpsDistance, hadGap: hadGap) }
     }
 
     /// Resolves the session's distance, choosing the best available source and
@@ -672,10 +718,11 @@ struct ActivitySessionView: View {
     /// - GPS on, ride with a dropout → keep the straight-line bridge, flagged estimated.
     /// - GPS off, walk/run → pedometer distance (the expected source, not a failure).
     @MainActor
-    private func finalize(_ s: ActivitySession, end: Date, seconds: Double,
+    private func finalize(_ s: ActivitySession, end: Date, seconds: Double, paused: Double,
                           gpsDistance: Double, hadGap: Bool) async {
         s.endedAt = end
         s.activeSeconds = seconds
+        s.pausedSeconds = paused
 
         let ped = await MotionService.shared.pedometer(from: s.startedAt, to: end)
         if s.type.pedometerDistance, let steps = ped?.steps { s.steps = steps }

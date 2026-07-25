@@ -7,8 +7,11 @@ final class ActivitySession {
     var typeRaw: String = ActivityType.walk.rawValue
     var startedAt: Date = Date()
     var endedAt: Date?
-    /// Active seconds (excludes pauses — RunKit sessions don't pause yet).
+    /// Active seconds — excludes any time spent paused.
     var activeSeconds: TimeInterval = 0
+    /// Total wall-clock seconds spent paused (v0.27). `activeSeconds +
+    /// pausedSeconds` is the elapsed wall time from start to finish.
+    var pausedSeconds: TimeInterval = 0
     var distanceMeters: Double = 0
     var steps: Int = 0
     var flights: Int = 0

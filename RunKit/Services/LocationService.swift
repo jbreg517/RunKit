@@ -69,6 +69,27 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         manager.stopUpdatingLocation()
     }
 
+    /// Suspend updates mid-session **without** clearing the accumulated route,
+    /// distance or gap flag — `startTracking()` resets all of those, so
+    /// pause/resume must not go through it.
+    func pauseTracking() {
+        isTracking = false
+        manager.stopUpdatingLocation()
+        currentSpeedMps = 0
+    }
+
+    /// Resume after `pauseTracking()`. Drops the last fix so the stretch covered
+    /// while paused is neither counted as distance nor mistaken for a GPS
+    /// dropout: with `lastLocation == nil` the next fix simply re-anchors.
+    func resumeTracking() {
+        lastLocation = nil
+        lastFixTime = nil
+        speedSamples = []
+        currentSpeedMps = 0
+        isTracking = true
+        manager.startUpdatingLocation()
+    }
+
     // MARK: CLLocationManagerDelegate
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {

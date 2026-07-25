@@ -11,7 +11,14 @@ struct SettingsView: View {
     @AppStorage("voiceAccent") private var voiceAccent = VoiceAccent.british.rawValue
     @AppStorage("voiceGender") private var voiceGender = VoiceGender.female.rawValue
     @AppStorage("coachStyle") private var coachStyle = CoachStyle.system.rawValue
+    @AppStorage("weeklyActiveTarget") private var weeklyTarget = 3
     @State private var showClear = false
+
+    @Query private var sessions: [ActivitySession]
+    @State private var exporting = false
+    @State private var exportURLs: [URL] = []
+    @State private var showShare = false
+    @State private var exportError: String?
 
     var body: some View {
         NavigationStack {
@@ -75,10 +82,34 @@ struct SettingsView: View {
                     Text("Voice announces each \(unitRaw == UnitSystem.imperial.rawValue ? "mile" : "kilometer"), goals, and a finish recap — all on your device. \"Natural\" is a bundled human-sounding coach (it falls back to \"System\" until its voice pack ships). For \"System\", if \"Using\" shows \"compact\" — or not the accent/gender you picked — that voice isn't installed: add it free in iOS Settings ▸ Accessibility ▸ Spoken Content ▸ Voices ▸ English. GPS is used only while a session runs; routes stay on your device.")
                 }
 
-                Section("Data") {
+                Section("Weekly Streak") {
+                    Stepper("Active days a week: \(weeklyTarget)",
+                            value: $weeklyTarget, in: 1...7)
+                } footer: {
+                    Text("Streaks count weeks, not days, so rest days never break them.")
+                }
+
+                Section {
+                    Button {
+                        exportData()
+                    } label: {
+                        if exporting {
+                            HStack { Text("Preparing…"); Spacer(); ProgressView() }
+                        } else {
+                            Label("Export My Data", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                    .disabled(exporting || sessions.isEmpty)
+
                     Button(role: .destructive) { showClear = true } label: {
                         Text("Clear All Data")
                     }
+                } header: {
+                    Text("Data")
+                } footer: {
+                    Text(sessions.isEmpty
+                         ? "Record an activity to enable export."
+                         : "Exports every session as CSV plus a GPX track per recorded route — standard formats any other app can read. Generated on your device; nothing is uploaded.")
                 }
 
                 Section {
@@ -98,6 +129,30 @@ struct SettingsView: View {
             } message: {
                 Text("This permanently removes all recorded activities. This can’t be undone.")
             }
+            .sheet(isPresented: $showShare) {
+                ShareSheet(items: exportURLs)
+            }
+            .alert("Export failed", isPresented: .constant(exportError != nil)) {
+                Button("OK") { exportError = nil }
+            } message: {
+                Text(exportError ?? "")
+            }
+        }
+    }
+
+    /// Writes CSV + GPX to the temp directory, then hands the URLs to the share
+    /// sheet. Runs inline on the main actor: `ActivitySession` is a SwiftData
+    /// `@Model` and isn't `Sendable`, so it can't cross to a detached task — and
+    /// serialising even a few thousand sessions is only string building.
+    private func exportData() {
+        exporting = true
+        do {
+            exportURLs = try ExportService.exportAll(sessions)
+            exporting = false
+            showShare = true
+        } catch {
+            exportError = error.localizedDescription
+            exporting = false
         }
     }
 

@@ -62,6 +62,23 @@ struct RKPrimaryButtonStyle: ButtonStyle {
     }
 }
 
+/// Neutral counterpart to `RKPrimaryButtonStyle` — same metrics, recessive fill.
+/// Used where two actions sit side by side (Pause next to Finish) and only one
+/// should carry the accent.
+struct RKSecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(RKFont.bodyBold)
+            .foregroundColor(RKColor.textPrimary)
+            .frame(maxWidth: .infinity)
+            .padding(RKSpacing.md)
+            .background(RKColor.surfaceElevated)
+            .cornerRadius(RKRadius.medium)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
 extension View {
     /// Caps content width and centers it (no-op on iPhone, tidy on iPad).
     func readableWidth(_ maxWidth: CGFloat = 700) -> some View {
