@@ -134,6 +134,92 @@ than rendering a misleading chart:
 
 ---
 
+## 4b. Aerobic decoupling — research
+
+### What it is
+Over a steady aerobic effort, compare **output ÷ heart rate** in the first half
+against the second. If heart rate creeps up while pace holds — or pace fades
+while heart rate holds — the two have *decoupled*. Popularised by Joe Friel and
+TrainingPeaks (as **Pa:Hr** for pace, **Pw:Hr** for cycling power).
+
+```
+EF₁ = avg speed (first half)  ÷ avg HR (first half)
+EF₂ = avg speed (second half) ÷ avg HR (second half)
+decoupling % = (EF₁ − EF₂) ÷ EF₁ × 100
+```
+
+The conventional reading: **under ~5% means your aerobic base supports that
+duration at that intensity**; above it means it doesn't — yet. Treat 5% as a
+widely-used coaching heuristic, not a clinical threshold.
+
+### Why it's worth tracking — the case
+1. **It controls for conditions in a way raw pace cannot.** Pace is confounded by
+   heat, wind, hills, sleep and fatigue, so "am I getting fitter?" is genuinely
+   hard to answer from pace alone. Decoupling is a *within-run* ratio, so it
+   cancels much of that: it asks whether you held together, not how fast you were.
+2. **It validates the easy running RunKit already nudges toward.** The 80/20 card
+   tells you *how much* easy running you did; decoupling tells you whether that
+   easy running is **working**. Falling decoupling on comparable runs is direct
+   evidence the aerobic base is improving. Those two cards answer a complete
+   question together, which is a stronger product story than either alone.
+3. **It's an early fatigue/illness signal.** A familiar route at a familiar effort
+   that suddenly decouples 10% instead of 4% points at heat stress, dehydration,
+   under-fuelling or oncoming illness — often before it's consciously noticed.
+   That feeds the v2 readiness score (`V2_DESIGN.md` §4) with a signal derived
+   from RunKit's own data rather than another HealthKit read.
+4. **It's a genuine differentiator.** Decoupling lives in the "serious" tools —
+   TrainingPeaks, WKO, Golden Cheetah — and is largely absent from Strava, Nike
+   Run Club and Apple Fitness. Shipping it free, on-device, fits the thesis of
+   giving away what others gate.
+
+### The honest caveats (these decide the design)
+Decoupling is **only meaningful on the right kind of run**, and publishing it for
+the wrong ones would be worse than not shipping it:
+
+- **Steady aerobic efforts only.** Intervals, fartlek, hill repeats and races
+  decouple by construction — the number is noise there.
+- **Long enough to drift.** Below ~30 minutes there isn't enough run for the
+  signal; 45+ minutes is the classic window.
+- **Terrain sensitive.** Pace-based decoupling punishes a route that climbs in
+  its second half. Cycling solves this with power; running power isn't standard
+  enough to rely on. Mitigate by preferring flat routes and reporting elevation
+  alongside.
+- **Heat and humidity cause cardiac drift on their own** — via plasma-volume loss,
+  not fitness. A hot-day reading isn't comparable to a cool-day one.
+- **Fuelling matters** on long runs; glycogen depletion drifts HR upward.
+- **Warm-up must be excluded**, or the first half is unfairly slow-and-low.
+- **Starting too hard** skews the first half and flatters the result.
+
+**Design consequence:** compute it only for sessions that qualify (steady,
+≥30 min, GPS route present, not intervals/custom), exclude the first ~10 minutes,
+and label it an estimate with the conditions caveat attached. Showing "—" with a
+reason is better than showing a confident wrong number — the same honest-estimates
+discipline as the calorie figures.
+
+### What RunKit needs to build it
+Everything required is already on the device:
+
+| Input | Source | Status |
+|---|---|---|
+| HR time series | HealthKit `heartRate` for the session window | ✅ already queried (v0.41) |
+| Pace time series | `RoutePoint` timestamps + coordinates | ✅ already recorded |
+| Split point | session midpoint after warm-up trim | derived |
+
+No new permission, no new sensor, **no Watch app**. The only real decision is
+storage: keeping a per-session HR series would cost space, but decoupling can be
+recomputed from HealthKit + `RoutePoint` on demand, so only the **result** needs
+persisting — one `Double` plus a validity reason, alongside the existing HR
+summary fields.
+
+### Companion metric: Efficiency Factor
+Same ratio, tracked *across* sessions instead of within one:
+`EF = avg speed ÷ avg HR`. Rising EF over weeks on comparable easy runs is the
+cleanest single "aerobic fitness is improving" line RunKit could plot — and it's
+computable **right now** from the avg HR already cached in v0.41, with no series
+data at all. Cheaper than decoupling and worth doing first.
+
+---
+
 ## 5. Build order
 
 | # | Item | Effort | Notes |
@@ -141,7 +227,9 @@ than rendering a misleading chart:
 | 1 | `StatsCalculator` + Summary/Records/Sessions frame | M | Tier 1 only — ✅ **v0.40** |
 | 2 | Swift Charts: weekly volume, pace trend | M | iOS 17 target, no dependency |
 | 3 | Read `heartRate` + derived types from HealthKit | M | ✅ **v0.41** — Tier 2 unlocked with no Watch app |
-| 4 | Zones + 80/20 distribution ✅ **v0.41**; decoupling & efficiency factor still open | L | Needs per-sample data kept, not just the summary |
+| 4 | Zones + 80/20 distribution | L | ✅ **v0.41** |
+| 4a | **Efficiency Factor** (avg speed ÷ avg HR, trended) | S | Computable now from cached avg HR — no series data. Do this before decoupling |
+| 4b | **Aerobic decoupling** (see §4b) | M | Recompute from HealthKit + RoutePoint; persist only the result. Must gate on qualifying runs |
 | 5 | Persist HR summary on `ActivitySession` | S | ✅ **v0.41** — avg/max/zone seconds cached at save, with a bounded backfill for older sessions |
 | 6 | Watch app | XL | For *live* HR + phone-free runs — no longer blocks analytics |
 
