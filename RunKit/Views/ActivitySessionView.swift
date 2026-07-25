@@ -984,7 +984,8 @@ struct ActivitySessionView: View {
 
         // Tick off the scheduled run this session came from, if any.
         if let id = activeScheduleID {
-            let match = FetchDescriptor<ScheduledRun>(predicate: #Predicate { $0.id == id })
+            let match = FetchDescriptor<ScheduledRun>(
+                predicate: #Predicate<ScheduledRun> { $0.id == id })
             if let sched = try? context.fetch(match).first {
                 sched.isCompleted = true
                 sched.completedAt = end

@@ -16,15 +16,23 @@ struct TodayView: View {
     private var templates: [CustomWorkout]
     @Query(sort: \ScheduledRun.date) private var scheduled: [ScheduledRun]
 
-    @State private var showBuilder = false
-    @State private var showSchedule = false
-    @State private var showLibrary = false
-    @State private var selectedDay: CalendarDay?
+    /// One sheet binding rather than four stacked `.sheet` modifiers — several
+    /// on a single view is a fragile SwiftUI pattern where later ones can be
+    /// silently ignored.
+    @State private var sheet: Sheet?
 
-    /// `sheet(item:)` needs an Identifiable, and `Date` isn't one.
-    private struct CalendarDay: Identifiable {
-        let date: Date
-        var id: TimeInterval { date.timeIntervalSince1970 }
+    private enum Sheet: Identifiable {
+        case builder, schedule, library
+        case day(Date)
+
+        var id: String {
+            switch self {
+            case .builder:      return "builder"
+            case .schedule:     return "schedule"
+            case .library:      return "library"
+            case let .day(d):   return "day-\(d.timeIntervalSince1970)"
+            }
+        }
     }
 
     /// Scheduled runs due today, plus any carried forward from a missed day.
@@ -55,7 +63,7 @@ struct TodayView: View {
                     startRunButton
                     todayRow
                     ActivityCalendarView(sessions: sessions, scheduled: scheduled) { day in
-                        selectedDay = CalendarDay(date: day)
+                        sheet = .day(day)
                     }
                     dueSection
                     templatesSection
@@ -74,26 +82,26 @@ struct TodayView: View {
             .navigationTitle("Today")
             .background(RKColor.background.ignoresSafeArea())
             .onAppear { motion.startToday() }
-            .sheet(isPresented: $showBuilder) {
-                // Built here, a workout is saved for reuse rather than run now —
-                // so this sheet saves on confirm and hides its own save control.
-                WorkoutBuilderView(unit: unit, primaryTitle: "Save", offersSave: false) { built, name in
-                    context.insert(CustomWorkout(name: name.isEmpty ? "Untitled" : name,
-                                                 steps: built))
-                }
-            }
-            .sheet(isPresented: $showSchedule) {
-                ScheduleRunSheet(unit: unit)
-            }
-            .sheet(item: $selectedDay) { day in
-                DayDetailSheet(day: day.date, unit: unit,
-                               sessions: sessions, scheduled: scheduled) { run in
-                    router.startRun(PendingWorkout(scheduled: run))
-                }
-            }
-            .sheet(isPresented: $showLibrary) {
-                WorkoutLibraryView(unit: unit) { recipe in
-                    router.startRun(PendingWorkout(recipe: recipe))
+            .sheet(item: $sheet) { which in
+                switch which {
+                case .builder:
+                    // Built here, a workout is saved for reuse rather than run
+                    // now — so this saves on confirm and hides its own control.
+                    WorkoutBuilderView(unit: unit, primaryTitle: "Save", offersSave: false) { built, name in
+                        context.insert(CustomWorkout(name: name.isEmpty ? "Untitled" : name,
+                                                     steps: built))
+                    }
+                case .schedule:
+                    ScheduleRunSheet(unit: unit)
+                case .library:
+                    WorkoutLibraryView(unit: unit) { recipe in
+                        router.startRun(PendingWorkout(recipe: recipe))
+                    }
+                case let .day(date):
+                    DayDetailSheet(day: date, unit: unit,
+                                   sessions: sessions, scheduled: scheduled) { run in
+                        router.startRun(PendingWorkout(scheduled: run))
+                    }
                 }
             }
         }
@@ -166,7 +174,7 @@ struct TodayView: View {
                 sectionHeader("YOUR WORKOUTS")
                 Spacer()
                 Button {
-                    showSchedule = true
+                    sheet = .schedule
                 } label: {
                     Label("Schedule", systemImage: "calendar")
                         .font(.system(size: 12, weight: .semibold))
@@ -212,7 +220,7 @@ struct TodayView: View {
             }
 
             Button {
-                showBuilder = true
+                sheet = .builder
             } label: {
                 HStack(spacing: RKSpacing.sm) {
                     Image(systemName: "plus.circle.fill")
@@ -284,7 +292,7 @@ struct TodayView: View {
             }
 
             Button {
-                showLibrary = true
+                sheet = .library
             } label: {
                 HStack(spacing: RKSpacing.sm) {
                     Image(systemName: "square.grid.2x2.fill")
