@@ -48,8 +48,8 @@ the name already renders directly beneath the icon):
   smaller at *every* size.
 - Mark-only reads cleanly all the way down to 40 px.
 
-Currently shipping the **wordmark** variant by choice. To switch:
+Currently shipping the **mark-only** variant. To switch to the wordmark:
 
 ```bash
-cp tools/icon/runkit-icon-mark-only.png RunKit/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+cp tools/icon/runkit-icon-wordmark.png RunKit/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
 ```
