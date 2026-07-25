@@ -1,8 +1,9 @@
 # RunKit — TestFlight smoke test
 
-> **Purpose:** v0.15–v0.25 were written blind. They compile and ship, but the
-> runtime paths below have **never been exercised**. This checklist targets
-> exactly that code — it is not generic QA.
+> **Purpose:** everything from v0.15 on was written blind (no Xcode on the dev
+> machine). v0.15–v0.25 compile and shipped to TestFlight, but the runtime paths
+> below have **never been exercised** — and v0.26–v0.34 have not been built at
+> all yet. This checklist targets exactly that code; it is not generic QA.
 >
 > Work top to bottom. Where a step says *why*, that's the specific bug the step
 > is hunting. Report failures with the step number.
@@ -15,7 +16,7 @@
       wedges in the corners** and no wordmark.
       *Why: the icon was rebuilt full-bleed from a pre-rounded mockup.*
 - [ ] **A2** Today tab: ring renders, step count is non-zero after a short walk.
-- [ ] **A3** Settings → version reads **0.25**.
+- [ ] **A3** Settings → version matches the build you installed (currently **0.34**).
 - [ ] **A4** Grant Motion, then Location (When-In-Use), then Health when prompted.
       Each prompt should have plain-language copy.
 
