@@ -178,32 +178,62 @@ workflows:
             --create
           keychain add-certificates
           xcode-project use-profiles
+          # Show what actually got fetched and applied — if the widget's App ID
+          # is missing or unprovisioned, it shows up here rather than as an
+          # opaque archive failure.
+          echo "===== provisioning profiles on disk ====="
+          ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/ 2>/dev/null || echo "(none)"
+          echo "===== signing identities ====="
+          security find-identity -v -p codesigning | head -20
+          echo "===== export options ====="
+          cat ~/export_options.plist 2>/dev/null || echo "(no export_options.plist)"
 
-      - name: Build signed IPA
+      - name: Archive (signed)
         script: |
-          # NOTE: pipefail only (no `set -e`). `xcode-project build-ipa` prints
-          # "Failed to archive" and exits 65 without the underlying compiler or
-          # signing errors — with `set -e` the script aborts before we can dig
-          # them out of its log, leaving nothing to diagnose. Capture the exit
-          # code, then always surface the real errors.
+          # Run xcodebuild directly rather than `xcode-project build-ipa`: the
+          # wrapper reports only "Failed to archive" + status 65 and keeps its
+          # log somewhere we couldn't grep, so a failure gave us nothing to work
+          # with. Teeing our own log guarantees the real errors are visible.
+          # pipefail only (no `set -e`) so the grep below always runs.
           set -o pipefail
-          xcode-project build-ipa \
-            --project RunKit.xcodeproj \
-            --scheme RunKit
-          STATUS=$?
-          if [ "$STATUS" -ne 0 ]; then
-            echo "===== BUILD FAILED (status $STATUS) — real errors below ====="
-            for LOG in /tmp/xcodebuild_*.log; do
-              [ -f "$LOG" ] || continue
-              echo "----- $LOG -----"
-              grep -E "error:|Build FAILED|ARCHIVE FAILED|Undefined symbol|Provisioning|doesn't include|No profile|requires a provisioning" "$LOG" | tail -60
-            done
+          xcodebuild archive \
+            -project RunKit.xcodeproj \
+            -scheme RunKit \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$CM_BUILD_DIR/RunKit.xcarchive" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            2>&1 | tee /tmp/archive.log
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ] || [ ! -d "$CM_BUILD_DIR/RunKit.xcarchive" ]; then
+            echo "===== ARCHIVE FAILED (status $STATUS) — errors below ====="
+            grep -E "error:|Build FAILED|ARCHIVE FAILED|Undefined symbol|no profile|No profile|doesn't include|provisioning|Signing|requires a development team" /tmp/archive.log | tail -80
+            echo "===== last 40 lines of raw log ====="
+            tail -40 /tmp/archive.log
             exit 1
           fi
 
+      - name: Export IPA
+        script: |
+          set -o pipefail
+          # `use-profiles` wrote ~/export_options.plist during the signing step.
+          xcodebuild -exportArchive \
+            -archivePath "$CM_BUILD_DIR/RunKit.xcarchive" \
+            -exportPath build/ios/ipa \
+            -exportOptionsPlist ~/export_options.plist \
+            2>&1 | tee /tmp/export.log
+          STATUS=${PIPESTATUS[0]}
+          if [ "$STATUS" -ne 0 ]; then
+            echo "===== EXPORT FAILED (status $STATUS) ====="
+            tail -60 /tmp/export.log
+            exit 1
+          fi
+          ls -lh build/ios/ipa/
+
     artifacts:
       - build/ios/ipa/*.ipa
-      - /tmp/xcodebuild_*.log
+      - /tmp/archive.log
+      - /tmp/export.log
     publishing:
       app_store_connect:
         auth: integration
