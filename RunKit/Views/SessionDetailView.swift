@@ -27,6 +27,7 @@ struct SessionDetailView: View {
                 }
                 summaryTiles
                 secondaryStats
+                if !session.customSteps.isEmpty { stepsCard }
                 if !splits.isEmpty { splitsCard }
                 if let notes = session.notes, !notes.isEmpty { notesCard(notes) }
                 doAgainButton
@@ -130,6 +131,34 @@ struct SessionDetailView: View {
     }
 
     // MARK: Splits
+
+    /// The custom workout as it was run — snapshotted on the session, so editing
+    /// or deleting the saved workout later can't rewrite history.
+    private var stepsCard: some View {
+        VStack(alignment: .leading, spacing: RKSpacing.sm) {
+            Text(session.customWorkoutName.isEmpty ? "Workout" : session.customWorkoutName)
+                .font(RKFont.heading).foregroundColor(RKColor.textPrimary)
+            ForEach(Array(session.customSteps.enumerated()), id: \.element.id) { i, step in
+                HStack(spacing: RKSpacing.sm) {
+                    Text("\(i + 1)")
+                        .font(RKFont.caption).foregroundColor(RKColor.textMuted)
+                        .frame(width: 16, alignment: .trailing)
+                    Image(systemName: step.kind.sfSymbol)
+                        .font(RKFont.caption)
+                        .foregroundColor(step.kind == .work ? RKColor.accent : RKColor.textMuted)
+                    Text(step.kind.label)
+                        .font(RKFont.caption).foregroundColor(RKColor.textSecondary)
+                    Spacer()
+                    Text(step.summary(unit))
+                        .font(RKFont.caption).foregroundColor(RKColor.textPrimary)
+                }
+            }
+        }
+        .padding(RKSpacing.md)
+        .background(RKColor.surface)
+        .cornerRadius(RKRadius.large)
+        .padding(.horizontal, RKSpacing.md)
+    }
 
     private var splitsCard: some View {
         let perUnit = splits.map { $0.seconds / max(unit.distance($0.meters), 0.0001) }

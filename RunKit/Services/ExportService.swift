@@ -14,7 +14,7 @@ enum ExportService {
     // MARK: CSV
 
     private static let csvHeader = [
-        "started_at", "ended_at", "type", "workout_type",
+        "started_at", "ended_at", "type", "workout_type", "custom_workout",
         "active_seconds", "paused_seconds", "distance_meters",
         "steps", "flights", "active_energy_kcal",
         "used_gps", "distance_estimated", "manual_distance",
@@ -31,6 +31,7 @@ enum ExportService {
                 s.endedAt.map { iso.string(from: $0) } ?? "",
                 s.type.rawValue,
                 s.workoutType.rawValue,
+                s.customWorkoutName,
                 String(format: "%.0f", s.activeSeconds),
                 String(format: "%.0f", s.pausedSeconds),
                 String(format: "%.1f", s.distanceMeters),

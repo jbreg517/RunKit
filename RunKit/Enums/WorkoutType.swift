@@ -1,9 +1,10 @@
 import Foundation
 
 /// The single "run type" picker. Free is open; Distance/Time set a target;
-/// Intervals repeats work/rest; Pace holds a target pace with over/under cues.
+/// Intervals repeats work/rest; Pace holds a target pace with over/under cues;
+/// Custom runs an arbitrary sequence of `WorkoutStep`s (warm-up → work → …).
 enum WorkoutType: String, CaseIterable, Identifiable {
-    case free, distance, time, intervals, pace
+    case free, distance, time, intervals, pace, custom
 
     var id: String { rawValue }
 
@@ -14,6 +15,7 @@ enum WorkoutType: String, CaseIterable, Identifiable {
         case .time:      return "Time"
         case .intervals: return "Intervals"
         case .pace:      return "Pace"
+        case .custom:    return "Custom"
         }
     }
 
@@ -24,6 +26,7 @@ enum WorkoutType: String, CaseIterable, Identifiable {
         case .time:      return "timer"
         case .intervals: return "repeat"
         case .pace:      return "speedometer"
+        case .custom:    return "list.bullet.indent"
         }
     }
 }

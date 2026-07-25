@@ -34,6 +34,14 @@ struct ActivitySessionView: View {
     @State private var intRepsText = "8"
     @State private var paceText = ""               // "mm:ss" per unit
     @State private var showLibrary = false
+    @State private var showBuilder = false
+    // Custom multi-segment workout state.
+    @State private var steps: [WorkoutStep] = []
+    @State private var customName = ""
+    @State private var stepIndex = 0
+    @State private var stepStartElapsed: TimeInterval = 0
+    @State private var stepStartMeters: Double = 0
+    @State private var stepsDone = false
     /// Name of the picked `WorkoutRecipe`, shown until the params are edited.
     @State private var recipeName: String?
     @FocusState private var fieldFocused: Bool
@@ -138,6 +146,8 @@ struct ActivitySessionView: View {
             Button("Start \(selectedType.rawValue)") { startCountdown() }
                 .buttonStyle(RKPrimaryButtonStyle())
                 .padding(.horizontal, RKSpacing.md)
+                // A custom run with no steps would start and immediately finish.
+                .disabled(workoutType == .custom && steps.isEmpty)
         }
     }
 
@@ -204,6 +214,8 @@ struct ActivitySessionView: View {
                         .keyboardType(.numbersAndPunctuation).textFieldStyle(.roundedBorder).focused($fieldFocused)
                     Text("min \(unit.paceUnit)").foregroundColor(RKColor.textSecondary)
                 }
+            case .custom:
+                customSetup
             }
         }
         .padding(RKSpacing.md)
@@ -212,6 +224,49 @@ struct ActivitySessionView: View {
         .padding(.horizontal, RKSpacing.md)
         .sheet(isPresented: $showLibrary) {
             WorkoutLibraryView(unit: unit) { apply($0) }
+        }
+        .sheet(isPresented: $showBuilder) {
+            WorkoutBuilderView(unit: unit) { built, name in
+                steps = built
+                customName = name
+                workoutType = .custom
+                recipeName = name.isEmpty ? nil : name
+            }
+        }
+    }
+
+    /// Custom workout: a compact preview of the step list plus an edit entry point.
+    private var customSetup: some View {
+        VStack(alignment: .leading, spacing: RKSpacing.sm) {
+            if steps.isEmpty {
+                Text("Build a sequence of steps — warm-up, work at a target pace, cool-down.")
+                    .font(RKFont.caption).foregroundColor(RKColor.textMuted)
+            } else {
+                ForEach(Array(steps.enumerated()), id: \.element.id) { i, step in
+                    HStack(spacing: RKSpacing.sm) {
+                        Text("\(i + 1)")
+                            .font(RKFont.caption).foregroundColor(RKColor.textMuted)
+                            .frame(width: 16, alignment: .trailing)
+                        Image(systemName: step.kind.sfSymbol)
+                            .font(RKFont.caption)
+                            .foregroundColor(step.kind == .work ? RKColor.accent : RKColor.textMuted)
+                        Text(step.kind.label)
+                            .font(RKFont.caption).foregroundColor(RKColor.textSecondary)
+                        Spacer()
+                        Text(step.summary(unit))
+                            .font(RKFont.caption).foregroundColor(RKColor.textPrimary)
+                    }
+                }
+            }
+            Button {
+                fieldFocused = false
+                showBuilder = true
+            } label: {
+                Label(steps.isEmpty ? "Build workout" : "Edit steps",
+                      systemImage: "slider.horizontal.3")
+                    .font(RKFont.caption)
+            }
+            .padding(.top, 2)
         }
     }
 
@@ -229,8 +284,8 @@ struct ActivitySessionView: View {
             intWorkText = "\(r.work)"
             intRestText = "\(r.rest)"
             intRepsText = "\(r.reps)"
-        case .free, .pace:
-            break
+        case .free, .pace, .custom:
+            break   // library recipes never carry pace targets or step lists
         }
         recipeName = r.name
     }
@@ -275,6 +330,7 @@ struct ActivitySessionView: View {
         VStack(spacing: RKSpacing.lg) {
             if session?.usedGPS == true { mapCard }
             if workoutType == .intervals { intervalBanner }
+            if workoutType == .custom { stepBanner }
 
             VStack(spacing: RKSpacing.xs) {
                 Text(timeString(elapsed))
@@ -300,6 +356,43 @@ struct ActivitySessionView: View {
             }
             .padding(.horizontal, RKSpacing.md)
         }
+    }
+
+    /// Current step, what's left of it, and what's next.
+    private var stepBanner: some View {
+        let step = (stepIndex < steps.count && !stepsDone) ? steps[stepIndex] : nil
+        let remaining: String = {
+            guard let step else { return "" }
+            switch step.basis {
+            case .time:
+                return timeString(max(0, step.seconds - (elapsed - stepStartElapsed)))
+            case .distance:
+                let left = max(0, step.meters - (location.distanceMeters - stepStartMeters))
+                return unit.distanceString(left)
+            }
+        }()
+        return VStack(spacing: RKSpacing.xs) {
+            Text(stepsDone ? "DONE" : (step?.kind.label.uppercased() ?? ""))
+                .font(.system(size: 28, weight: .black))
+                .foregroundColor(step?.kind == .work && !stepsDone ? RKColor.accent : RKColor.textSecondary)
+            if let step, !stepsDone {
+                Text("\(remaining) left  ·  Step \(stepIndex + 1) of \(steps.count)")
+                    .font(RKFont.caption).foregroundColor(RKColor.textMuted)
+                if step.hasPaceTarget {
+                    Text("Target \(step.targetText(unit).replacingOccurrences(of: "@ ", with: ""))")
+                        .font(RKFont.caption).foregroundColor(RKColor.textSecondary)
+                }
+                if stepIndex + 1 < steps.count {
+                    Text("Next: \(steps[stepIndex + 1].kind.label) · \(steps[stepIndex + 1].summary(unit))")
+                        .font(RKFont.caption).foregroundColor(RKColor.textMuted)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(RKSpacing.md)
+        .background((step?.kind == .work && !stepsDone) ? RKColor.accent.opacity(0.15) : RKColor.surface)
+        .cornerRadius(RKRadius.large)
+        .padding(.horizontal, RKSpacing.md)
     }
 
     private var intervalBanner: some View {
@@ -517,6 +610,9 @@ struct ActivitySessionView: View {
         if workoutType == .intervals, voiceOn {
             SpeechService.shared.speak(intReps <= 1 ? .intervalLast : .intervalWork(rep: 1, total: intReps))
         }
+        if workoutType == .custom, let first = steps.first {
+            announceStep(first)
+        }
 
         LiveActivityManager.shared.start(label: selectedType.rawValue, startDate: startDate ?? Date(),
                                          distanceText: unit.distanceString(location.distanceMeters),
@@ -548,6 +644,15 @@ struct ActivitySessionView: View {
         case .pace:
             paceTargetSecPerMeter = parsePace(paceText)
             s.paceTargetSecPerMeter = paceTargetSecPerMeter
+        case .custom:
+            stepIndex = 0
+            stepStartElapsed = 0
+            stepStartMeters = 0
+            stepsDone = steps.isEmpty
+            // Snapshot the steps onto the session so history still shows what was
+            // run even if the saved workout is later edited or deleted.
+            s.customStepsJSON = WorkoutStep.encode(steps)
+            s.customWorkoutName = customName
         }
     }
 
@@ -587,6 +692,7 @@ struct ActivitySessionView: View {
         switch workoutType {
         case .intervals: tickIntervals()
         case .pace:      tickPace()
+        case .custom:    tickCustom()
         case .distance, .time:
             if !goalAnnounced, goalTarget > 0, goalFraction() >= 1 {
                 goalAnnounced = true
@@ -631,6 +737,9 @@ struct ActivitySessionView: View {
     private func liveDetail() -> String {
         if pausedAt != nil { return "Paused" }
         switch workoutType {
+        case .custom:
+            guard !stepsDone, stepIndex < steps.count else { return "Workout done" }
+            return "\(steps[stepIndex].kind.label) · \(stepIndex + 1)/\(steps.count)"
         case .intervals:
             return intervalsDone ? "Intervals done" : "\(intPhaseIsWork ? "WORK" : "REST") · \(intRep)/\(intReps)"
         case .pace:
@@ -650,9 +759,15 @@ struct ActivitySessionView: View {
     }
 
     private func tickPace() {
-        guard paceTargetSecPerMeter > 0, displayedSpeedMps > 0.4,
+        nudgeToward(paceTargetSecPerMeter)
+    }
+
+    /// Shared over/under-pace nudging. Silent without a target, while barely
+    /// moving (so a red light doesn't nag), and more often than every 25s.
+    private func nudgeToward(_ target: Double) {
+        guard target > 0, displayedSpeedMps > 0.4,
               elapsed - lastPaceNudge >= 25 else { return }
-        let ratio = (1.0 / displayedSpeedMps) / paceTargetSecPerMeter   // >1 = slower than target
+        let ratio = (1.0 / displayedSpeedMps) / target   // >1 = slower than target
         if ratio > 1.08 {
             lastPaceNudge = elapsed
             if voiceOn { SpeechService.shared.speak(.pace(.faster)) }
@@ -660,6 +775,58 @@ struct ActivitySessionView: View {
             lastPaceNudge = elapsed
             if voiceOn { SpeechService.shared.speak(.pace(.slower)) }
         }
+    }
+
+    /// Advances the custom step sequence. Each step ends on its own basis —
+    /// elapsed time or distance covered since the step began — and carries its
+    /// own optional pace target.
+    private func tickCustom() {
+        guard !stepsDone, stepIndex < steps.count else { return }
+        let step = steps[stepIndex]
+
+        let finished: Bool
+        switch step.basis {
+        case .time:     finished = elapsed - stepStartElapsed >= step.seconds
+        case .distance: finished = location.distanceMeters - stepStartMeters >= step.meters
+        }
+
+        if finished {
+            advanceStep()
+        } else {
+            nudgeToward(step.paceTargetSecPerMeter)
+        }
+    }
+
+    private func advanceStep() {
+        stepIndex += 1
+        stepStartElapsed = elapsed
+        stepStartMeters = location.distanceMeters
+        lastPaceNudge = elapsed          // don't nudge the instant a step starts
+
+        guard stepIndex < steps.count else {
+            stepsDone = true
+            if voiceOn { SpeechService.shared.speak(.workoutComplete) }
+            pushLiveActivity()
+            return
+        }
+        announceStep(steps[stepIndex])
+        pushLiveActivity()
+    }
+
+    private func announceStep(_ step: WorkoutStep) {
+        guard voiceOn else { return }
+        let amount: String
+        switch step.basis {
+        case .time:
+            let m = Int((step.seconds / 60).rounded())
+            amount = m > 0 ? "\(m) minute\(m == 1 ? "" : "s")" : "\(Int(step.seconds)) seconds"
+        case .distance:
+            amount = unit.spokenDistance(step.meters)
+        }
+        let target = step.hasPaceTarget
+            ? unit.spokenPace(seconds: step.paceTargetSecPerMeter * unitMeters, meters: unitMeters)
+            : nil
+        SpeechService.shared.speak(.stepStart(kind: step.kind, amount: amount, target: target))
     }
 
     private func announceUnitMark(_ n: Int) {

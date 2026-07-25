@@ -30,6 +30,11 @@ final class ActivitySession {
     var intervalRest: Double = 0          // seconds
     var intervalReps: Int = 0
     var paceTargetSecPerMeter: Double = 0 // unit-agnostic target pace
+    /// Custom multi-segment workout (v0.29): the steps actually run, snapshotted
+    /// as JSON so history reflects the session even if the saved workout is
+    /// later edited or deleted.
+    var customStepsJSON: String = "[]"
+    var customWorkoutName: String = ""
     var notes: String?
 
     @Relationship(deleteRule: .cascade, inverse: \RoutePoint.session)
@@ -42,5 +47,6 @@ final class ActivitySession {
 
     var type: ActivityType { ActivityType(rawValue: typeRaw) ?? .walk }
     var workoutType: WorkoutType { WorkoutType(rawValue: workoutTypeRaw) ?? .free }
+    var customSteps: [WorkoutStep] { WorkoutStep.decode(customStepsJSON) }
     var sortedRoute: [RoutePoint] { route.sorted { $0.timestamp < $1.timestamp } }
 }

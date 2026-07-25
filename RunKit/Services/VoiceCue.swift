@@ -19,6 +19,10 @@ enum VoiceCue {
     case intervalLast
     case intervalsComplete
     case pace(PaceCue)
+    /// Custom-workout segment starting: kind, its amount ("5 miles"), and an
+    /// optional spoken pace target.
+    case stepStart(kind: WorkoutStep.Kind, amount: String, target: String?)
+    case workoutComplete
 }
 
 /// Strategy for speaking a cue. `SystemVoiceCoach` (AVSpeechSynthesizer) is the
@@ -113,6 +117,21 @@ enum VoiceScript {
             case .slower: return [w("pace_slower", "Ease off.")]
             case .onPace: return [w("pace_on", "On pace.")]
             }
+
+        case let .stepStart(kind, amount, target):
+            // Amount/target are free-form ("5.0 miles", "8 minutes per mile"), so
+            // they get no clip ID — that makes `ClipVoiceCoach` fall back to the
+            // system voice for this cue, which is exactly what dynamic text needs.
+            var t: [VoiceToken] = [w("step_\(kind.rawValue)", kind.spoken + "."), brk()]
+            t.append(VoiceToken(clipID: nil, text: amount + " "))
+            if let target, !target.isEmpty {
+                t.append(w("step_at", "at"))
+                t.append(VoiceToken(clipID: nil, text: target + " "))
+            }
+            return t
+
+        case .workoutComplete:
+            return [w("workout_done", "Workout complete.")]
 
         case .sample:
             return [line("sample", "Kilometer three. Good for you.")]
