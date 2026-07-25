@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage("voiceGender") private var voiceGender = VoiceGender.female.rawValue
     @AppStorage("coachStyle") private var coachStyle = CoachStyle.system.rawValue
     @AppStorage("weeklyActiveTarget") private var weeklyTarget = 3
+    @AppStorage("maxHeartRate") private var maxHeartRate = 0.0
     @State private var showClear = false
 
     @Query private var sessions: [ActivitySession]
@@ -31,6 +32,7 @@ struct SettingsView: View {
                 unitsSection
                 trackingSection
                 streakSection
+                heartRateSection
                 dataSection
                 aboutSection
             }
@@ -140,6 +142,21 @@ struct SettingsView: View {
             Text("Weekly Streak")
         } footer: {
             Text("Streaks count weeks, not days, so rest days never break them.")
+        }
+    }
+
+    private var heartRateSection: some View {
+        Section {
+            Stepper(maxHeartRate > 0 ? "Max heart rate: \(Int(maxHeartRate)) bpm" : "Max heart rate: automatic",
+                    value: $maxHeartRate, in: 0...220, step: 1)
+            if maxHeartRate > 0 {
+                Button("Use automatic") { maxHeartRate = 0 }
+                    .foregroundColor(RKColor.accent)
+            }
+        } header: {
+            Text("Heart Rate")
+        } footer: {
+            Text("Sets your training zones. Automatic prefers the highest rate Apple Health has recorded for you, falling back to an age estimate — that formula is off by 10 bpm or more for many people, so set it here if you know your true max.")
         }
     }
 

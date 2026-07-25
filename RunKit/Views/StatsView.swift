@@ -18,8 +18,13 @@ struct StatsView: View {
 
     @Query(sort: \ActivitySession.startedAt, order: .reverse) private var sessions: [ActivitySession]
 
+    @AppStorage("maxHeartRate") private var maxHeartRateOverride = 0.0
+
     @State private var tab: Segment = .summary
     @State private var period: StatsCalculator.Period = .month
+    @State private var restingHR: Double?
+    @State private var vo2: Double?
+    @State private var didBackfill = false
 
     private enum Segment: String, CaseIterable, Identifiable {
         case summary, records, sessions
@@ -51,7 +56,27 @@ struct StatsView: View {
             .navigationTitle("Stats")
             .background(RKColor.background.ignoresSafeArea())
             .navigationDestination(for: ActivitySession.self) { SessionDetailView(session: $0) }
+            .task { await loadHeartRate() }
         }
+    }
+
+    /// Reads the standing HR figures, then catches up any sessions whose summary
+    /// was never cached (recorded before v0.41, or before Health was granted).
+    /// Bounded per visit so a long history can't stall the screen.
+    private func loadHeartRate() async {
+        restingHR = await HealthService.shared.latestRestingHeartRate()
+        vo2 = await HealthService.shared.latestVO2Max()
+        guard !didBackfill else { return }
+        didBackfill = true
+        let observed = sessions.map(\.maxHeartRateBpm).max()
+        let maxHR = HeartRateZones.maxHeartRate(
+            override: maxHeartRateOverride,
+            observed: observed,
+            age: SuiteProfileStore.load()?.age ?? 0)
+        await HeartRateBackfill.catchUp(
+            sessions,
+            zones: HeartRateZones.zones(maxHR: maxHR, restingHR: restingHR),
+            context: context)
     }
 
     private var content: some View {
@@ -197,12 +222,110 @@ struct StatsView: View {
         }
     }
 
-    /// Empty until heart-rate samples exist. HR does **not** need a Watch app —
-    /// HealthKit exposes samples from any source; see `docs/ANALYTICS.md`.
+    /// Heart rate read from HealthKit — samples from an Apple Watch, chest strap
+    /// or any other source. No Watch app of our own required; see `docs/ANALYTICS.md`.
+    @ViewBuilder
     private var heartRateCard: some View {
-        statRow("Heart rate", "—",
-                "Zones, training distribution and aerobic drift appear here once heart-rate data is available from Apple Health.",
-                "heart.fill")
+        let scoped = StatsCalculator.inPeriod(sessions, period)
+        let withHR = scoped.filter(\.hasHeartRate)
+        if withHR.isEmpty {
+            statRow("Heart rate", "—",
+                    restingHR == nil
+                    ? "Zones and training distribution appear here once Apple Health has heart-rate data — from an Apple Watch or any other source."
+                    : "No heart rate recorded for this period. Resting HR \(Int(restingHR ?? 0)) bpm.",
+                    "heart.fill")
+        } else {
+            heartRateSummary(withHR)
+        }
+    }
+
+    private func heartRateSummary(_ withHR: [ActivitySession]) -> some View {
+        let avg = withHR.map(\.avgHeartRateBpm).reduce(0, +) / Double(withHR.count)
+        let peak = withHR.map(\.maxHeartRateBpm).max() ?? 0
+        var totals = [Double](repeating: 0, count: 5)
+        for s in withHR {
+            for (i, v) in s.hrZoneSeconds.enumerated() where i < 5 { totals[i] += v }
+        }
+        let grand = totals.reduce(0, +)
+        return VStack(alignment: .leading, spacing: RKSpacing.sm) {
+            HStack {
+                Label("Heart rate", systemImage: "heart.fill")
+                    .font(RKFont.heading).foregroundColor(RKColor.textPrimary)
+                Spacer()
+                Text("\(Int(avg)) avg · \(Int(peak)) max")
+                    .font(RKFont.bodyBold).foregroundColor(RKColor.accent)
+            }
+
+            if grand > 0 {
+                zoneBars(totals, grand: grand)
+                Text(distributionNote(totals, grand: grand))
+                    .font(RKFont.caption)
+                    .foregroundColor(RKColor.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: RKSpacing.lg) {
+                if let restingHR {
+                    smallStat("Resting", "\(Int(restingHR)) bpm")
+                }
+                if let vo2 {
+                    smallStat("VO₂ max", String(format: "%.1f", vo2))
+                }
+                smallStat("Sessions", "\(withHR.count)")
+            }
+        }
+        .padding(RKSpacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RKColor.surface)
+        .cornerRadius(RKRadius.large)
+        .padding(.horizontal, RKSpacing.md)
+    }
+
+    private func zoneBars(_ totals: [Double], grand: Double) -> some View {
+        VStack(spacing: 4) {
+            ForEach(Array(totals.enumerated()), id: \.offset) { i, seconds in
+                let pct = seconds / grand
+                HStack(spacing: RKSpacing.sm) {
+                    Text("Z\(i + 1)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(RKColor.textMuted)
+                        .frame(width: 20, alignment: .leading)
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(RKColor.surfaceElevated)
+                            Capsule()
+                                .fill(RKColor.accent.opacity(0.35 + 0.14 * Double(i)))
+                                .frame(width: max(2, geo.size.width * pct))
+                        }
+                    }
+                    .frame(height: 12)
+                    Text("\(Int(pct * 100))%")
+                        .font(.system(size: 11))
+                        .foregroundColor(RKColor.textSecondary)
+                        .frame(width: 34, alignment: .trailing)
+                }
+            }
+        }
+    }
+
+    /// The 80/20 read: most amateurs run their easy runs too hard, so surfacing
+    /// the easy share is the actionable part.
+    private func distributionNote(_ totals: [Double], grand: Double) -> String {
+        let easy = (totals[0] + totals[1]) / grand
+        let pct = Int(easy * 100)
+        if easy >= 0.75 {
+            return "\(pct)% of your time is easy (Z1–Z2) — a healthy aerobic base."
+        } else if easy >= 0.6 {
+            return "\(pct)% easy. Polarized training suggests nearer 80% — consider slowing your easy runs."
+        }
+        return "Only \(pct)% easy. Running easy runs too hard is the most common amateur mistake; aim nearer 80%."
+    }
+
+    private func smallStat(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(value).font(RKFont.bodyBold).foregroundColor(RKColor.textPrimary)
+            Text(label).font(RKFont.caption).foregroundColor(RKColor.textMuted)
+        }
     }
 
     private func statRow(_ title: String, _ value: String, _ note: String, _ icon: String) -> some View {

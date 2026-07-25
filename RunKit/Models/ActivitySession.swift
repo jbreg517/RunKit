@@ -35,6 +35,15 @@ final class ActivitySession {
     /// later edited or deleted.
     var customStepsJSON: String = "[]"
     var customWorkoutName: String = ""
+
+    /// Heart-rate summary (v0.41), read from HealthKit at save time and cached
+    /// here so Stats never re-queries per render. 0 = none was recorded, which
+    /// is normal without an Apple Watch. `hrCheckedAt` distinguishes "no watch"
+    /// from "not looked yet", so backfill can skip sessions already examined.
+    var avgHeartRateBpm: Double = 0
+    var maxHeartRateBpm: Double = 0
+    var hrZoneSecondsJSON: String = "[]"
+    var hrCheckedAt: Date?
     var notes: String?
 
     @Relationship(deleteRule: .cascade, inverse: \RoutePoint.session)
@@ -48,5 +57,7 @@ final class ActivitySession {
     var type: ActivityType { ActivityType(rawValue: typeRaw) ?? .walk }
     var workoutType: WorkoutType { WorkoutType(rawValue: workoutTypeRaw) ?? .free }
     var customSteps: [WorkoutStep] { WorkoutStep.decode(customStepsJSON) }
+    var hrZoneSeconds: [Double] { HeartRateZones.decode(hrZoneSecondsJSON) }
+    var hasHeartRate: Bool { avgHeartRateBpm > 0 }
     var sortedRoute: [RoutePoint] { route.sorted { $0.timestamp < $1.timestamp } }
 }

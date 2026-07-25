@@ -19,7 +19,13 @@ final class HealthService {
         var s = Set<HKObjectType>()
         // bodyMass: shared across the suite (LiftKit / FuelKit log it) so runs get
         // an accurate calorie burn.
-        [.stepCount, .distanceWalkingRunning, .flightsClimbed, .activeEnergyBurned, .bodyMass]
+        // heartRate and friends are READ-ONLY and need no Watch app of our own:
+        // HealthKit surfaces samples written by any source (Apple Watch, a chest
+        // strap, another app), and Apple Watch computes vo2Max / restingHeartRate
+        // / HRV / recovery for free. See docs/ANALYTICS.md §1.
+        [.stepCount, .distanceWalkingRunning, .flightsClimbed, .activeEnergyBurned, .bodyMass,
+         .heartRate, .restingHeartRate, .heartRateVariabilitySDNN, .vo2Max,
+         .heartRateRecoveryOneMinute]
             .compactMap { HKObjectType.quantityType(forIdentifier: $0) }
             .forEach { s.insert($0) }
         return s
@@ -63,6 +69,48 @@ final class HealthService {
         } catch {
             return nil
         }
+    }
+
+    // MARK: Heart rate (read-only)
+
+    /// Heart-rate samples in a window, oldest first, as (time, bpm). Empty when
+    /// nothing was recording — which is the normal case without a Watch.
+    func heartRateSamples(from start: Date, to end: Date) async -> [(date: Date, bpm: Double)] {
+        guard available, end > start,
+              let type = HKQuantityType.quantityType(forIdentifier: .heartRate) else { return [] }
+        let range = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: type, predicate: range)],
+            sortDescriptors: [SortDescriptor(\.startDate, order: .forward)],
+            limit: HKObjectQueryNoLimit)
+        do {
+            let unit = HKUnit.count().unitDivided(by: .minute())
+            return try await descriptor.result(for: store)
+                .map { ($0.startDate, $0.quantity.doubleValue(for: unit)) }
+        } catch {
+            return []
+        }
+    }
+
+    /// Most recent value of a simple quantity type — resting HR, VO₂ max, HRV.
+    func latestValue(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit) async -> Double? {
+        guard available, let type = HKQuantityType.quantityType(forIdentifier: identifier) else { return nil }
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: type, predicate: nil)],
+            sortDescriptors: [SortDescriptor(\.endDate, order: .reverse)],
+            limit: 1)
+        return try? await descriptor.result(for: store).first?.quantity.doubleValue(for: unit)
+    }
+
+    func latestRestingHeartRate() async -> Double? {
+        await latestValue(.restingHeartRate, unit: .count().unitDivided(by: .minute()))
+    }
+
+    func latestVO2Max() async -> Double? {
+        // ml/(kg·min)
+        let unit = HKUnit.literUnit(with: .milli)
+            .unitDivided(by: .gramUnit(with: .kilo).unitMultiplied(by: .minute()))
+        return await latestValue(.vo2Max, unit: unit)
     }
 
     /// Saves a finished session to Health via the workout builder, attaching the

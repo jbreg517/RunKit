@@ -22,6 +22,7 @@ struct ActivitySessionView: View {
     @AppStorage("gpsEnabled") private var gpsEnabled = true
     @AppStorage("unitSystem") private var unitRaw = UnitSystem.metric.rawValue
     @AppStorage("voiceAnnouncements") private var voiceOn = true
+    @AppStorage("maxHeartRate") private var maxHeartRateOverride = 0.0
     private var unit: UnitSystem { UnitSystem(rawValue: unitRaw) ?? .metric }
 
     @State private var location = LocationService.shared
@@ -1024,6 +1025,16 @@ struct ActivitySessionView: View {
         }
 
         await HealthService.shared.save(s)
+
+        // Cache the heart-rate summary now, while the session's window is fresh.
+        // No Watch simply leaves it at zero. Written after the workout save so
+        // Health has the workout to attribute samples to.
+        let resting = await HealthService.shared.latestRestingHeartRate()
+        let maxHR = HeartRateZones.maxHeartRate(
+            override: maxHeartRateOverride,
+            observed: nil,
+            age: SuiteProfileStore.load()?.age ?? 0)
+        await HeartRateBackfill.fill(s, zones: HeartRateZones.zones(maxHR: maxHR, restingHR: resting))
     }
 
     private func timeString(_ t: TimeInterval) -> String {

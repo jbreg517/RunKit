@@ -18,6 +18,7 @@ enum ExportService {
         "active_seconds", "paused_seconds", "distance_meters",
         "steps", "flights", "active_energy_kcal",
         "used_gps", "distance_estimated", "manual_distance",
+        "avg_heart_rate_bpm", "max_heart_rate_bpm",
         "route_points", "notes",
     ].joined(separator: ",")
 
@@ -41,6 +42,8 @@ enum ExportService {
                 s.usedGPS ? "true" : "false",
                 s.distanceEstimated ? "true" : "false",
                 s.manualDistance ? "true" : "false",
+                s.avgHeartRateBpm > 0 ? String(format: "%.0f", s.avgHeartRateBpm) : "",
+                s.maxHeartRateBpm > 0 ? String(format: "%.0f", s.maxHeartRateBpm) : "",
                 "\(s.route.count)",
                 s.notes ?? "",
             ].map(field).joined(separator: ","))

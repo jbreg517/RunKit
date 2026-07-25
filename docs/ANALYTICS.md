@@ -140,9 +140,9 @@ than rendering a misleading chart:
 |---|---|---|---|
 | 1 | `StatsCalculator` + Summary/Records/Sessions frame | M | Tier 1 only — ✅ **v0.40** |
 | 2 | Swift Charts: weekly volume, pace trend | M | iOS 17 target, no dependency |
-| 3 | Read `heartRate` + derived types from HealthKit | M | Unlocks Tier 2 **without** a Watch app |
-| 4 | Zones, distribution, decoupling, efficiency factor | L | Needs 3 |
-| 5 | Persist HR summary on `ActivitySession` | S | Avoids re-querying HealthKit per render |
+| 3 | Read `heartRate` + derived types from HealthKit | M | ✅ **v0.41** — Tier 2 unlocked with no Watch app |
+| 4 | Zones + 80/20 distribution ✅ **v0.41**; decoupling & efficiency factor still open | L | Needs per-sample data kept, not just the summary |
+| 5 | Persist HR summary on `ActivitySession` | S | ✅ **v0.41** — avg/max/zone seconds cached at save, with a bounded backfill for older sessions |
 | 6 | Watch app | XL | For *live* HR + phone-free runs — no longer blocks analytics |
 
 **Reordering note:** `ROADMAP.md` Phase 3 put the Watch app (3.6) ahead of HR

@@ -27,6 +27,7 @@ struct SessionDetailView: View {
                 }
                 summaryTiles
                 secondaryStats
+                if session.hasHeartRate { heartRateCard }
                 if !session.customSteps.isEmpty { stepsCard }
                 if !splits.isEmpty { splitsCard }
                 if let notes = session.notes, !notes.isEmpty { notesCard(notes) }
@@ -131,6 +132,49 @@ struct SessionDetailView: View {
     }
 
     // MARK: Splits
+
+    /// Heart rate for this session, cached from HealthKit at save time.
+    private var heartRateCard: some View {
+        let zoneSeconds = session.hrZoneSeconds
+        let total = zoneSeconds.reduce(0, +)
+        return VStack(alignment: .leading, spacing: RKSpacing.sm) {
+            HStack {
+                Label("Heart rate", systemImage: "heart.fill")
+                    .font(RKFont.heading).foregroundColor(RKColor.textPrimary)
+                Spacer()
+                Text("\(Int(session.avgHeartRateBpm)) avg · \(Int(session.maxHeartRateBpm)) max")
+                    .font(RKFont.bodyBold).foregroundColor(RKColor.accent)
+            }
+            if total > 0 {
+                ForEach(Array(zoneSeconds.enumerated()), id: \.offset) { i, seconds in
+                    HStack(spacing: RKSpacing.sm) {
+                        Text("Z\(i + 1)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(RKColor.textMuted)
+                            .frame(width: 20, alignment: .leading)
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(RKColor.surfaceElevated)
+                                Capsule()
+                                    .fill(RKColor.accent.opacity(0.35 + 0.14 * Double(i)))
+                                    .frame(width: max(2, geo.size.width * (seconds / total)))
+                            }
+                        }
+                        .frame(height: 12)
+                        Text("\(Int(seconds / 60))m")
+                            .font(.system(size: 11))
+                            .foregroundColor(RKColor.textSecondary)
+                            .frame(width: 34, alignment: .trailing)
+                    }
+                }
+            }
+        }
+        .padding(RKSpacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RKColor.surface)
+        .cornerRadius(RKRadius.large)
+        .padding(.horizontal, RKSpacing.md)
+    }
 
     /// The custom workout as it was run — snapshotted on the session, so editing
     /// or deleting the saved workout later can't rewrite history.
