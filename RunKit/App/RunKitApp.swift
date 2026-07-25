@@ -4,7 +4,7 @@ import SwiftData
 /// Bumped +0.01 per push (shared convention with LiftKit). CI derives the build
 /// number from the git commit count.
 enum AppVersion {
-    static let current = "0.30"
+    static let current = "0.31"
 }
 
 @main
@@ -36,9 +36,6 @@ struct RootTabView: View {
             TodayView()
                 .tabItem { Label("Today", systemImage: "circle.dashed") }
                 .tag(AppRouter.Tab.today)
-            ActivitySessionView()
-                .tabItem { Label("Activity", systemImage: "figure.run") }
-                .tag(AppRouter.Tab.activity)
             HistoryView()
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
                 .tag(AppRouter.Tab.history)
@@ -48,5 +45,11 @@ struct RootTabView: View {
         }
         .tint(RKColor.accent)
         .environment(router)
+        // Presented here rather than inside a tab so "Do Again" works from
+        // History too, and a running session gets the full screen.
+        .fullScreenCover(isPresented: $router.showActivity) {
+            ActivitySessionView()
+                .environment(router)
+        }
     }
 }

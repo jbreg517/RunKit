@@ -18,6 +18,7 @@ enum GoalKind: String, CaseIterable, Identifiable {
 struct ActivitySessionView: View {
     @Environment(\.modelContext) private var context
     @Environment(AppRouter.self) private var router
+    @Environment(\.dismiss) private var dismiss
     @AppStorage("gpsEnabled") private var gpsEnabled = true
     @AppStorage("unitSystem") private var unitRaw = UnitSystem.metric.rawValue
     @AppStorage("voiceAnnouncements") private var voiceOn = true
@@ -124,11 +125,19 @@ struct ActivitySessionView: View {
             }
             .navigationTitle("Activity")
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    // Only offered when idle: a running session lives in this
+                    // view's state, so dismissing mid-run would discard it.
+                    if session == nil {
+                        Button("Close") { dismiss() }
+                    }
+                }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("Done") { fieldFocused = false }
                 }
             }
+            .interactiveDismissDisabled(session != nil)
             .onAppear {
                 consumePendingType()
                 // Warm the pedometer so a GPS-off session has a live baseline to

@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct TodayView: View {
+    @Environment(AppRouter.self) private var router
     @AppStorage("dailyStepGoal") private var goal = 8000
     @AppStorage("unitSystem") private var unitRaw = UnitSystem.metric.rawValue
     @AppStorage("weeklyActiveTarget") private var weeklyTarget = 3
@@ -24,8 +25,9 @@ struct TodayView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: RKSpacing.lg) {
-                    ringCard
-                    statsGrid
+                    startRunButton
+                    todayRow
+                    ActivityCalendarView(sessions: sessions)
                     streakCard
                     if !motion.available {
                         Text("Step tracking isn’t available on this device.")
@@ -71,54 +73,85 @@ struct TodayView: View {
         .padding(.horizontal, RKSpacing.md)
     }
 
-    private var ringCard: some View {
-        ZStack {
-            Circle().stroke(RKColor.surfaceElevated, lineWidth: 18)
-            Circle()
-                .trim(from: 0, to: progress)
-                .stroke(RKColor.accent, style: StrokeStyle(lineWidth: 18, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.easeOut, value: progress)
-            VStack(spacing: 2) {
-                Text("\(motion.steps)")
-                    .font(.system(size: 46, weight: .heavy, design: .rounded))
-                    .foregroundColor(RKColor.textPrimary)
-                    .contentTransition(.numericText())
-                Text("of \(goal) steps")
-                    .font(RKFont.caption)
-                    .foregroundColor(RKColor.textMuted)
+    /// Primary action. Activity is no longer a tab, so this is the way in.
+    private var startRunButton: some View {
+        Button {
+            router.startRun()
+        } label: {
+            Label("Start Run", systemImage: "figure.run")
+        }
+        .buttonStyle(RKPrimaryButtonStyle())
+        .padding(.horizontal, RKSpacing.md)
+    }
+
+    /// Step ring on the left, the three stat cards stacked on the right.
+    private var todayRow: some View {
+        HStack(alignment: .top, spacing: RKSpacing.md) {
+            ringCard
+            VStack(spacing: RKSpacing.sm) {
+                stat(String(format: "%.2f", unit.distance(motion.distanceMeters)),
+                     unit.distanceUnit, "map")
+                stat("\(Int(estimatedKcal))", "kcal", "flame.fill")
+                stat("\(motion.flights)", "flights", "stairs")
             }
         }
-        .frame(width: 220, height: 220)
-        .frame(maxWidth: .infinity)
-        .padding(RKSpacing.lg)
-        .background(RKColor.surface)
-        .cornerRadius(RKRadius.large)
         .padding(.horizontal, RKSpacing.md)
     }
 
-    private var statsGrid: some View {
-        HStack(spacing: RKSpacing.md) {
-            stat(String(format: "%.2f", unit.distance(motion.distanceMeters)), unit.distanceUnit, "map")
-            stat("\(motion.flights)", "flights", "stairs")
-            stat("\(Int(estimatedKcal))", "kcal", "flame.fill")
-        }
-        .padding(.horizontal, RKSpacing.md)
-    }
+    private var ringCard: some View {
+        VStack(spacing: RKSpacing.sm) {
+            ZStack {
+                Circle().stroke(RKColor.surfaceElevated, lineWidth: 12)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(RKColor.accent, style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeOut, value: progress)
+                VStack(spacing: 0) {
+                    Text("\(motion.steps)")
+                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .foregroundColor(RKColor.textPrimary)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                        .contentTransition(.numericText())
+                    Text("steps")
+                        .font(RKFont.caption)
+                        .foregroundColor(RKColor.textMuted)
+                }
+                .padding(.horizontal, 6)
+            }
+            .frame(width: 124, height: 124)
 
-    private func stat(_ value: String, _ label: String, _ icon: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon).foregroundColor(RKColor.accent)
-            Text(value)
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .foregroundColor(RKColor.textPrimary)
-            Text(label)
+            Text("of \(goal)")
                 .font(RKFont.caption)
                 .foregroundColor(RKColor.textMuted)
-                .lineLimit(1).minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
         .padding(RKSpacing.md)
+        .background(RKColor.surface)
+        .cornerRadius(RKRadius.large)
+    }
+
+    /// Compact stat row — sized to sit in the narrow right-hand column.
+    private func stat(_ value: String, _ label: String, _ icon: String) -> some View {
+        HStack(spacing: RKSpacing.sm) {
+            Image(systemName: icon)
+                .foregroundColor(RKColor.accent)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(value)
+                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                    .foregroundColor(RKColor.textPrimary)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                Text(label)
+                    .font(RKFont.caption)
+                    .foregroundColor(RKColor.textMuted)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, RKSpacing.md)
+        .padding(.vertical, 12)
         .background(RKColor.surface)
         .cornerRadius(RKRadius.large)
     }
