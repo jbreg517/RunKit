@@ -4,7 +4,7 @@ import SwiftData
 /// Bumped +0.01 per push (shared convention with LiftKit). CI derives the build
 /// number from the git commit count.
 enum AppVersion {
-    static let current = "0.23"
+    static let current = "0.24"
 }
 
 @main

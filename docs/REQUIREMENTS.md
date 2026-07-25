@@ -1,6 +1,6 @@
 # RunKit — Requirements & Spec
 
-> Status: **v0.20 — TestFlight beta prep.** Living document.
+> Status: **v0.24 — TestFlight beta prep.** Living document.
 > Platform: iOS 17+, SwiftUI + SwiftData. Built on Windows, archived via Codemagic.
 > Differentiation strategy lives in the companion doc **`DIFFERENTIATION.md`**.
 
@@ -157,10 +157,11 @@ in the roadmap below.
   roadmap — intervals + voice were slated for v2.*
 - **v1.0 (App Store launch)** — harden the shipped surface; finalize icon + listing
   (*RunKit: No-Login Run Tracker*); TestFlight → review. Keep lean.
-- **v1.1 (fast-follow, mostly cheap wins)** — Widgets (home/lock) + StandBy;
-  GPX/CSV export polish; **App Intents / Siri / Shortcuts + Automations**
-  ("start a RunKit run"); **coach personality packs** (Hype/Zen/Drill Sergeant);
-  **free structured-workout library** (C25K/tempo/fartlek/hill repeats);
+- **v1.1 (fast-follow, mostly cheap wins)** — ✅ **free structured-workout library**
+  (v0.24 — 16 recipes across a C25K ramp / speed / endurance / hills / recovery,
+  browsable from session setup); then: Widgets (home/lock) + StandBy; GPX/CSV
+  export polish; **App Intents / Siri / Shortcuts + Automations** ("start a
+  RunKit run"); **coach personality packs** (Hype/Zen/Drill Sergeant);
   **honest streaks** (respect rest days, no guilt); **map privacy zones**
   (auto-blur start/end near home).
 - **v2.0 (differentiation tentpoles)** — **LiftKit-style planning calendar**;

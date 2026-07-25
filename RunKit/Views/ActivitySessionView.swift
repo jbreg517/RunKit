@@ -33,6 +33,9 @@ struct ActivitySessionView: View {
     @State private var intRestText = "90"
     @State private var intRepsText = "8"
     @State private var paceText = ""               // "mm:ss" per unit
+    @State private var showLibrary = false
+    /// Name of the picked `WorkoutRecipe`, shown until the params are edited.
+    @State private var recipeName: String?
     @FocusState private var fieldFocused: Bool
 
     // Session lifecycle
@@ -138,11 +141,38 @@ struct ActivitySessionView: View {
             HStack {
                 Text("Run type").font(RKFont.heading).foregroundColor(RKColor.textPrimary)
                 Spacer()
-                Picker("Run type", selection: $workoutType) {
+                // Explicit binding rather than `.onChange`: changing the type by
+                // hand drops the recipe label, but `apply(_:)` setting the type
+                // must not (onChange would fire after apply and wipe the name).
+                Picker("Run type", selection: Binding(
+                    get: { workoutType },
+                    set: { workoutType = $0; recipeName = nil }
+                )) {
                     ForEach(WorkoutType.allCases) { Label($0.label, systemImage: $0.sfSymbol).tag($0) }
                 }
                 .pickerStyle(.menu)
                 .tint(RKColor.accent)
+            }
+
+            // Library entry point. Kept as a single row so the setup card stays
+            // light — the catalog itself lives in a sheet.
+            Button {
+                fieldFocused = false
+                showLibrary = true
+            } label: {
+                HStack(spacing: RKSpacing.xs) {
+                    Image(systemName: "books.vertical.fill")
+                    Text(recipeName ?? "Browse workouts")
+                    Spacer()
+                    Image(systemName: "chevron.right").font(RKFont.caption)
+                }
+                .font(RKFont.caption)
+                .foregroundColor(recipeName == nil ? RKColor.accent : RKColor.textPrimary)
+                .padding(.horizontal, RKSpacing.sm)
+                .padding(.vertical, 9)
+                .frame(maxWidth: .infinity)
+                .background(RKColor.surfaceElevated)
+                .cornerRadius(RKRadius.small)
             }
 
             switch workoutType {
@@ -175,6 +205,29 @@ struct ActivitySessionView: View {
         .background(RKColor.surface)
         .cornerRadius(RKRadius.large)
         .padding(.horizontal, RKSpacing.md)
+        .sheet(isPresented: $showLibrary) {
+            WorkoutLibraryView(unit: unit) { apply($0) }
+        }
+    }
+
+    /// Load a library workout into the setup fields. Everything a recipe sets is
+    /// still editable afterwards — picking one is a starting point, not a lock.
+    private func apply(_ r: WorkoutRecipe) {
+        workoutType = r.workoutType
+        switch r.workoutType {
+        case .distance:
+            let d = unit.distance(r.meters)
+            goalValueText = d == d.rounded() ? String(format: "%.0f", d) : String(format: "%.1f", d)
+        case .time:
+            goalValueText = "\(r.minutes)"
+        case .intervals:
+            intWorkText = "\(r.work)"
+            intRestText = "\(r.rest)"
+            intRepsText = "\(r.reps)"
+        case .free, .pace:
+            break
+        }
+        recipeName = r.name
     }
 
     private var intervalsSetup: some View {
