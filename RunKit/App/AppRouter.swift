@@ -2,11 +2,11 @@ import Foundation
 import Observation
 
 /// App-wide navigation state shared via the environment. Lets a detail screen in
-/// one tab (e.g. "Do Again" in History) start a session without coupling the
+/// one tab (e.g. "Do Again" in Stats) start a session without coupling the
 /// views together.
 @Observable
 final class AppRouter {
-    enum Tab: Hashable { case today, history, settings }
+    enum Tab: Hashable { case today, stats, settings }
 
     var selectedTab: Tab = .today
 

@@ -4,7 +4,7 @@ import SwiftData
 /// Bumped +0.01 per push (shared convention with LiftKit). CI derives the build
 /// number from the git commit count.
 enum AppVersion {
-    static let current = "0.39"
+    static let current = "0.40"
 }
 
 @main
@@ -37,9 +37,9 @@ struct RootTabView: View {
             TodayView()
                 .tabItem { Label("Today", systemImage: "circle.dashed") }
                 .tag(AppRouter.Tab.today)
-            HistoryView()
-                .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
-                .tag(AppRouter.Tab.history)
+            StatsView()
+                .tabItem { Label("Stats", systemImage: "chart.bar.xaxis") }
+                .tag(AppRouter.Tab.stats)
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(AppRouter.Tab.settings)
