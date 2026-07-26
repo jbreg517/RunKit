@@ -133,6 +133,36 @@ struct SessionDetailView: View {
 
     // MARK: Splits
 
+    /// Decoupling, or the reason there isn't one — a stated reason beats a
+    /// confident wrong number on a run that doesn't qualify.
+    @ViewBuilder
+    private var decouplingRow: some View {
+        if session.hasDecoupling {
+            HStack(alignment: .top) {
+                Text("Decoupling").font(RKFont.caption).foregroundColor(RKColor.textMuted)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(String(format: "%.1f%%", session.decouplingPercent))
+                        .font(RKFont.caption)
+                        .foregroundColor(session.decouplingPercent < 5 ? RKColor.success : RKColor.accent)
+                    Text(session.decouplingNote)
+                        .font(.system(size: 11))
+                        .foregroundColor(RKColor.textMuted)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+        } else if !session.decouplingNote.isEmpty {
+            HStack {
+                Text("Decoupling").font(RKFont.caption).foregroundColor(RKColor.textMuted)
+                Spacer()
+                Text(session.decouplingNote)
+                    .font(.system(size: 11))
+                    .foregroundColor(RKColor.textMuted)
+                    .multilineTextAlignment(.trailing)
+            }
+        }
+    }
+
     /// Heart rate for this session, cached from HealthKit at save time.
     private var heartRateCard: some View {
         let zoneSeconds = session.hrZoneSeconds
@@ -145,6 +175,15 @@ struct SessionDetailView: View {
                 Text("\(Int(session.avgHeartRateBpm)) avg · \(Int(session.maxHeartRateBpm)) max")
                     .font(RKFont.bodyBold).foregroundColor(RKColor.accent)
             }
+            if let ef = AerobicAnalysis.efficiencyFactor(session) {
+                HStack {
+                    Text("Efficiency").font(RKFont.caption).foregroundColor(RKColor.textMuted)
+                    Spacer()
+                    Text(String(format: "%.2f m/beat", ef))
+                        .font(RKFont.caption).foregroundColor(RKColor.textSecondary)
+                }
+            }
+            decouplingRow
             if total > 0 {
                 ForEach(Array(zoneSeconds.enumerated()), id: \.offset) { i, seconds in
                     HStack(spacing: RKSpacing.sm) {

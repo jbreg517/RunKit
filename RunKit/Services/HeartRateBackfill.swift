@@ -20,6 +20,21 @@ enum HeartRateBackfill {
         session.maxHeartRateBpm = summary.maximum
         session.hrZoneSecondsJSON = HeartRateZones.encode(summary.zoneSeconds)
         session.hrCheckedAt = Date()
+
+        // Decoupling reuses the samples already fetched — no second query.
+        if let reason = AerobicAnalysis.eligibility(session) {
+            session.hasDecoupling = false
+            session.decouplingNote = reason.rawValue
+        } else if let result = AerobicAnalysis.decoupling(session, samples: samples) {
+            session.decouplingPercent = result.percent
+            session.hasDecoupling = true
+            session.decouplingNote = result.summary
+        } else {
+            session.hasDecoupling = false
+            session.decouplingNote = samples.isEmpty
+                ? AerobicAnalysis.Ineligible.noHeart.rawValue
+                : AerobicAnalysis.Ineligible.notEnough.rawValue
+        }
     }
 
     /// Catch-up pass over sessions never examined. Capped per run so opening

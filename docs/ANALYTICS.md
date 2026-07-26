@@ -228,8 +228,8 @@ data at all. Cheaper than decoupling and worth doing first.
 | 2 | Swift Charts: weekly volume, pace trend | M | iOS 17 target, no dependency |
 | 3 | Read `heartRate` + derived types from HealthKit | M | ✅ **v0.41** — Tier 2 unlocked with no Watch app |
 | 4 | Zones + 80/20 distribution | L | ✅ **v0.41** |
-| 4a | **Efficiency Factor** (avg speed ÷ avg HR, trended) | S | Computable now from cached avg HR — no series data. Do this before decoupling |
-| 4b | **Aerobic decoupling** (see §4b) | M | Recompute from HealthKit + RoutePoint; persist only the result. Must gate on qualifying runs |
+| 4a | **Efficiency Factor** (metres per heartbeat, trended) | S | ✅ **v0.43** |
+| 4b | **Aerobic decoupling** (see §4b) | M | ✅ **v0.43** — computed from the HR samples already fetched plus `RoutePoint`; only the result is persisted, gated on qualifying runs with a stated reason otherwise |
 | 5 | Persist HR summary on `ActivitySession` | S | ✅ **v0.41** — avg/max/zone seconds cached at save, with a bounded backfill for older sessions |
 | 6 | Watch app | XL | For *live* HR + phone-free runs — no longer blocks analytics |
 

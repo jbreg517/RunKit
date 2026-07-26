@@ -44,6 +44,13 @@ final class ActivitySession {
     var maxHeartRateBpm: Double = 0
     var hrZoneSecondsJSON: String = "[]"
     var hrCheckedAt: Date?
+
+    /// Aerobic decoupling (v0.43), recomputed alongside the HR summary. Only
+    /// meaningful on steady 30-minute-plus GPS runs — `decouplingNote` carries
+    /// the reason when it isn't available, which is better than a wrong number.
+    var decouplingPercent: Double = 0
+    var hasDecoupling: Bool = false
+    var decouplingNote: String = ""
     var notes: String?
 
     @Relationship(deleteRule: .cascade, inverse: \RoutePoint.session)

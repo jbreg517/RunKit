@@ -107,6 +107,7 @@ struct StatsView: View {
                 loadCard
                 cadenceCard
                 heartRateCard
+                efficiencyCard
             }
             .padding(.vertical, RKSpacing.md)
             .readableWidth()
@@ -321,6 +322,72 @@ struct StatsView: View {
         return "Only \(pct)% easy. Running easy runs too hard is the most common amateur mistake; aim nearer 80%."
     }
 
+    /// Efficiency Factor — metres travelled per heartbeat — plus how it's moved.
+    /// The single cleanest "aerobic fitness is improving" line, and it needs only
+    /// the cached average HR. Decoupling for the period sits alongside it.
+    @ViewBuilder
+    private var efficiencyCard: some View {
+        let scoped = StatsCalculator.inPeriod(sessions, period)
+        if let ef = AerobicAnalysis.averageEfficiencyFactor(scoped) {
+            VStack(alignment: .leading, spacing: RKSpacing.sm) {
+                HStack {
+                    Label("Aerobic efficiency", systemImage: "arrow.up.right.circle")
+                        .font(RKFont.heading).foregroundColor(RKColor.textPrimary)
+                    Spacer()
+                    Text(String(format: "%.2f m/beat", ef))
+                        .font(RKFont.bodyBold).foregroundColor(RKColor.accent)
+                }
+                if let trend = AerobicAnalysis.efficiencyTrendPercent(scoped) {
+                    Text(trendText(trend))
+                        .font(RKFont.caption)
+                        .foregroundColor(trend >= 0 ? RKColor.success : RKColor.textSecondary)
+                }
+                Text("How far you travel per heartbeat. Rising over comparable easy runs means your aerobic base is improving.")
+                    .font(RKFont.caption)
+                    .foregroundColor(RKColor.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                decouplingLine(scoped)
+            }
+            .padding(RKSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RKColor.surface)
+            .cornerRadius(RKRadius.large)
+            .padding(.horizontal, RKSpacing.md)
+        }
+    }
+
+    private func trendText(_ pct: Double) -> String {
+        let dir = pct >= 0 ? "up" : "down"
+        return String(format: "%@ %.1f%% versus earlier in this period.", dir.capitalized, abs(pct))
+    }
+
+    @ViewBuilder
+    private func decouplingLine(_ scoped: [ActivitySession]) -> some View {
+        let measured = scoped.filter(\.hasDecoupling)
+        if !measured.isEmpty {
+            let avg = measured.map(\.decouplingPercent).reduce(0, +) / Double(measured.count)
+            Divider().padding(.vertical, 2)
+            HStack {
+                Text("Aerobic decoupling")
+                    .font(RKFont.bodyBold).foregroundColor(RKColor.textPrimary)
+                Spacer()
+                Text(String(format: "%.1f%%", avg))
+                    .font(RKFont.bodyBold)
+                    .foregroundColor(avg < 5 ? RKColor.success : RKColor.accent)
+            }
+            Text(avg < 5
+                 ? "Pace and heart rate stayed coupled — your base supports these runs."
+                 : "Heart rate drifted up relative to pace. Common causes are heat, fuelling, or starting too hard.")
+                .font(RKFont.caption)
+                .foregroundColor(RKColor.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Measured on \(measured.count) steady run\(measured.count == 1 ? "" : "s") of 30 minutes or more.")
+                .font(.system(size: 11))
+                .foregroundColor(RKColor.textMuted)
+        }
+    }
+
     private func smallStat(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(value).font(RKFont.bodyBold).foregroundColor(RKColor.textPrimary)
@@ -411,10 +478,19 @@ struct StatsView: View {
     }
 
     private func row(_ s: ActivitySession) -> some View {
-        HStack(spacing: RKSpacing.md) {
-            Image(systemName: s.type.sfSymbol)
-                .foregroundColor(RKColor.accent)
-                .frame(width: 28)
+        let route = s.sortedRoute
+        return HStack(spacing: RKSpacing.md) {
+            // Route shape where there is one, falling back to the activity icon
+            // so rows stay the same height either way.
+            if route.count > 1 {
+                RouteThumbnail(points: RouteMath.downsample(route, target: 120))
+            } else {
+                Image(systemName: s.type.sfSymbol)
+                    .foregroundColor(RKColor.accent)
+                    .frame(width: 44, height: 44)
+                    .background(RKColor.surfaceElevated)
+                    .cornerRadius(RKRadius.small)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(s.type.rawValue)
                     .font(RKFont.bodyBold)
