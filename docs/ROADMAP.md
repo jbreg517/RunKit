@@ -108,7 +108,7 @@ Design detail in `V2_DESIGN.md`. **Strictly ordered — each depends on the last
 
 | # | Item | Effort | Risk | Depends on |
 |---|---|---|---|---|
-| 3.1 | **Planning calendar** + planned-workout model | L | Med | ✅ **Landed early (v0.31–0.33)** — month grid on Today (recorded = filled, planned = ringed), tappable days, `ScheduledRun` model, schedule sheet, due/carried-forward list |
+| 3.1 | **Planning calendar** + planned-workout model | L | Med | ✅ **Landed early (v0.31–0.33)** — month grid on Today (recorded = filled, planned = ringed), tappable days, `ScheduledRun` model, schedule sheet, due/carried-forward list, **recurring series** (v0.46 — weekday chips + end date, expanded into rows sharing a `seriesID`, optional per-weekday workout, Upcoming screen to cancel a series or clear all) |
 | 3.2 | Plan → session deep-link + completion matching | M | Med | ✅ **Landed early (v0.32)** — `PendingWorkout` carries a workout from any source into the session; finishing ticks its schedule complete |
 | 3.3 | **Training-plan generator** (goal + race date → weeks) | L | Med | ⬅️ **Next tentpole.** 3.1/3.2 done; needs 2.3's pace math. Emits `ScheduledRun`s in bulk |
 | 3.4 | **Readiness score** (HRV / RHR / sleep / load) | M | Med | New HealthKit read types |

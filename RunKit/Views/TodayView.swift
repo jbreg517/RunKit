@@ -23,7 +23,7 @@ struct TodayView: View {
     @State private var sheet: Sheet?
 
     private enum Sheet: Identifiable {
-        case builder, schedule, library
+        case builder, schedule, library, upcoming
         case day(Date)
 
         var id: String {
@@ -31,6 +31,7 @@ struct TodayView: View {
             case .builder:      return "builder"
             case .schedule:     return "schedule"
             case .library:      return "library"
+            case .upcoming:     return "upcoming"
             case let .day(d):   return "day-\(d.timeIntervalSince1970)"
             }
         }
@@ -111,6 +112,10 @@ struct TodayView: View {
                     WorkoutLibraryView(unit: unit) { recipe in
                         router.startRun(PendingWorkout(recipe: recipe))
                     }
+                case .upcoming:
+                    UpcomingRunsView(unit: unit) { run in
+                        router.startRun(PendingWorkout(scheduled: run))
+                    }
                 case let .day(date):
                     DayDetailSheet(day: date, unit: unit,
                                    sessions: sessions, scheduled: scheduled) { run in
@@ -177,42 +182,62 @@ struct TodayView: View {
     /// only as a calendar ring, which reads as "Schedule did nothing".
     @ViewBuilder
     private var upcomingSection: some View {
-        let upcoming = scheduled
-            .filter { !$0.isCompleted && $0.date > Calendar.current.startOfDay(for: Date()) }
+        let pending = scheduled.filter { !$0.isCompleted }
+        let upcoming = pending
+            .filter { $0.date > Calendar.current.startOfDay(for: Date()) }
             .prefix(4)
-        if !upcoming.isEmpty {
+        // The header (and its way into Upcoming) shows whenever anything is
+        // scheduled at all — otherwise a week where everything is due today would
+        // leave no route to manage or cancel a series.
+        if !pending.isEmpty {
             VStack(alignment: .leading, spacing: RKSpacing.sm) {
-                sectionHeader("UPCOMING")
-                    .padding(.horizontal, RKSpacing.md)
+                HStack {
+                    sectionHeader("UPCOMING")
+                    Spacer()
+                    Button("Manage") { sheet = .upcoming }
+                        .font(RKFont.caption)
+                        .foregroundColor(RKColor.accent)
+                }
+                .padding(.horizontal, RKSpacing.md)
+
                 ForEach(Array(upcoming)) { run in
-                    Button {
-                        router.startRun(PendingWorkout(scheduled: run))
-                    } label: {
-                        HStack(spacing: RKSpacing.md) {
-                            Image(systemName: run.type.sfSymbol)
-                                .foregroundColor(RKColor.textMuted)
-                                .frame(width: 24)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(run.title)
-                                    .font(RKFont.bodyBold)
-                                    .foregroundColor(RKColor.textPrimary)
-                                Text("\(dayLabel(run.date)) · \(run.summary(unit))")
-                                    .font(RKFont.caption)
-                                    .foregroundColor(RKColor.textMuted)
-                            }
-                            Spacer()
-                        }
-                        .padding(RKSpacing.md)
-                        .background(RKColor.surface)
-                        .cornerRadius(RKRadius.large)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, RKSpacing.md)
-                    .contextMenu {
-                        Button("Remove", role: .destructive) { context.delete(run) }
-                    }
+                    upcomingRow(run)
                 }
             }
+        }
+    }
+
+    private func upcomingRow(_ run: ScheduledRun) -> some View {
+        Button {
+            router.startRun(PendingWorkout(scheduled: run))
+        } label: {
+            HStack(spacing: RKSpacing.md) {
+                Image(systemName: run.type.sfSymbol)
+                    .foregroundColor(RKColor.textMuted)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(run.title)
+                        .font(RKFont.bodyBold)
+                        .foregroundColor(RKColor.textPrimary)
+                    Text("\(dayLabel(run.date)) · \(run.summary(unit))")
+                        .font(RKFont.caption)
+                        .foregroundColor(RKColor.textMuted)
+                }
+                Spacer()
+                if run.seriesID != nil {
+                    Image(systemName: "repeat")
+                        .font(RKFont.caption)
+                        .foregroundColor(RKColor.textMuted)
+                }
+            }
+            .padding(RKSpacing.md)
+            .background(RKColor.surface)
+            .cornerRadius(RKRadius.large)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, RKSpacing.md)
+        .contextMenu {
+            Button("Remove", role: .destructive) { context.delete(run) }
         }
     }
 

@@ -102,10 +102,21 @@ final class ScheduledRun {
     var stepsJSON: String = "[]"
     var isCompleted: Bool = false
     var completedAt: Date?
+    /// Links the occurrences created together by one recurring schedule so the
+    /// whole series can be managed — and cancelled — as a unit. nil for a one-off.
+    ///
+    /// A recurrence is **expanded into real rows at creation time** rather than
+    /// stored as a rule, matching LiftKit. Each occurrence is then independently
+    /// editable and deletable, the calendar needs no rule evaluation to draw a
+    /// month, and there's no unbounded "repeats forever" series to reason about.
+    /// Optional with a nil default keeps it a lightweight, CloudKit-compatible
+    /// migration.
+    var seriesID: UUID?
 
-    init(date: Date, from pending: PendingWorkout) {
+    init(date: Date, from pending: PendingWorkout, seriesID: UUID? = nil) {
         let segments = pending.resolvedSegments
         self.id = UUID()
+        self.seriesID = seriesID
         self.date = Calendar.current.startOfDay(for: date)
         self.typeRaw = pending.activityType.rawValue
         self.workoutTypeRaw = ActivitySegment.workoutType(for: segments).rawValue
