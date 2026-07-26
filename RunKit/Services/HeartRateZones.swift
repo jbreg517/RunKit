@@ -23,6 +23,12 @@ enum HeartRateZones {
     private static let bounds: [Double] = [0.50, 0.60, 0.70, 0.80, 0.90, 1.00]
     private static let names = ["Recovery", "Easy", "Steady", "Threshold", "VO₂ max"]
 
+    /// Name of a 1-based zone, for labelling a target the user hasn't run yet.
+    static func zoneName(_ index: Int) -> String {
+        let i = min(max(1, index), names.count)
+        return "Zone \(i) · \(names[i - 1])"
+    }
+
     /// - Parameters:
     ///   - maxHR: observed or user-set maximum.
     ///   - restingHR: enables the Karvonen model; nil falls back to %max.

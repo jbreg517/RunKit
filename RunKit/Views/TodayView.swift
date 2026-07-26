@@ -103,7 +103,7 @@ struct TodayView: View {
                     // now — so this saves on confirm and hides its own control.
                     WorkoutBuilderView(unit: unit, primaryTitle: "Save", offersSave: false) { built, name in
                         context.insert(CustomWorkout(name: name.isEmpty ? "Untitled" : name,
-                                                     steps: built))
+                                                     segments: built))
                     }
                 case .schedule:
                     ScheduleRunSheet(unit: unit)
@@ -320,10 +320,10 @@ struct TodayView: View {
     }
 
     private func templateSummary(_ t: CustomWorkout) -> String {
-        let steps = t.steps
-        let count = "\(steps.count) step\(steps.count == 1 ? "" : "s")"
-        guard let first = steps.first else { return count }
-        return "\(count) · starts \(first.summary(unit))"
+        let cards = t.segments
+        guard let first = cards.first else { return "Empty" }
+        guard cards.count > 1 else { return first.summary(unit) }
+        return "\(cards.count) cards · starts \(first.summary(unit))"
     }
 
     // MARK: Prebuilt workouts

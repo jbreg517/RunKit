@@ -19,6 +19,9 @@ enum UnitSystem: String, CaseIterable, Identifiable {
     private static let metersPerMile = 1609.344
     private static let feetPerMeter  = 3.28084
 
+    /// Metres in one display unit — 1000 for a kilometre, 1609.344 for a mile.
+    var metersPerUnit: Double { self == .metric ? 1000 : Self.metersPerMile }
+
     /// Meters → display distance (km or mi).
     func distance(_ meters: Double) -> Double {
         self == .metric ? meters / 1000 : meters / Self.metersPerMile
@@ -70,6 +73,30 @@ enum UnitSystem: String, CaseIterable, Identifiable {
         guard s > 0, s.isFinite else { return "--" }
         let v = Int(s.rounded())
         return String(format: "%d:%02d %@", v / 60, v % 60, paceUnit)
+    }
+
+    // MARK: Pace entry
+
+    /// Typed "mm:ss" (or plain minutes) per unit → seconds per **metre**, so the
+    /// stored target survives a units switch. 0 when the field is empty or junk.
+    func secondsPerMeter(fromPaceText text: String) -> Double {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return 0 }
+        let parts = trimmed.split(separator: ":")
+        var perUnit = 0.0
+        if parts.count == 2, let m = Double(parts[0]), let s = Double(parts[1]) {
+            perUnit = m * 60 + s
+        } else if let m = Double(trimmed.replacingOccurrences(of: ",", with: ".")) {
+            perUnit = m * 60
+        }
+        return perUnit > 0 ? perUnit / metersPerUnit : 0
+    }
+
+    /// Seconds per metre → the "mm:ss" the user typed. Empty when there's no target.
+    func paceText(fromSecondsPerMeter s: Double) -> String {
+        guard s > 0 else { return "" }
+        let perUnit = Int((s * metersPerUnit).rounded())
+        return String(format: "%d:%02d", perUnit / 60, perUnit % 60)
     }
 
     // MARK: Spoken (for voice announcements)

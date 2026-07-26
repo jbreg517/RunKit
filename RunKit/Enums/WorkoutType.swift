@@ -1,10 +1,14 @@
 import Foundation
 
-/// The single "run type" picker. Free is open; Distance/Time set a target;
-/// Intervals repeats work/rest; Pace holds a target pace with over/under cues;
-/// Custom runs an arbitrary sequence of `WorkoutStep`s (warm-up → work → …).
+/// How a finished (or scheduled) session is *classified* — the one label Stats,
+/// History and `AerobicAnalysis` sort by.
+///
+/// Since v0.45 this is no longer something the user picks. Sessions are built from
+/// `ActivitySegment` cards, and `ActivitySegment.workoutType(for:)` collapses the
+/// card list down to one of these: a single card takes its goal's name, and
+/// anything with more than one card is `.custom` — "Structured".
 enum WorkoutType: String, CaseIterable, Identifiable {
-    case free, distance, time, intervals, pace, custom
+    case free, distance, time, intervals, pace, heartRate, custom
 
     var id: String { rawValue }
 
@@ -15,7 +19,8 @@ enum WorkoutType: String, CaseIterable, Identifiable {
         case .time:      return "Time"
         case .intervals: return "Intervals"
         case .pace:      return "Pace"
-        case .custom:    return "Custom"
+        case .heartRate: return "Heart Rate"
+        case .custom:    return "Structured"
         }
     }
 
@@ -26,13 +31,13 @@ enum WorkoutType: String, CaseIterable, Identifiable {
         case .time:      return "timer"
         case .intervals: return "repeat"
         case .pace:      return "speedometer"
+        case .heartRate: return "heart.fill"
         case .custom:    return "list.bullet.indent"
         }
     }
 }
 
-/// Preset chips for the Intervals setup — "Sprints" is just an interval preset,
-/// keeping the type menu to five.
+/// Preset chips for an intervals card, so the common shapes are one tap.
 struct IntervalPreset: Identifiable {
     let name: String
     let work: Int   // seconds

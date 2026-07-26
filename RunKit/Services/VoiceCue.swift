@@ -19,9 +19,9 @@ enum VoiceCue {
     case intervalLast
     case intervalsComplete
     case pace(PaceCue)
-    /// Custom-workout segment starting: kind, its amount ("5 miles"), and an
-    /// optional spoken pace target.
-    case stepStart(kind: WorkoutStep.Kind, amount: String, target: String?)
+    /// A card starting: what it is ("Warm-up", or just "Run"), how much of it
+    /// ("5 miles"), and an optional spoken target.
+    case stepStart(activity: ActivityType, label: String, amount: String, target: String?)
     case workoutComplete
 }
 
@@ -118,11 +118,15 @@ enum VoiceScript {
             case .onPace: return [w("pace_on", "On pace.")]
             }
 
-        case let .stepStart(kind, amount, target):
+        case let .stepStart(act, label, amount, target):
             // Amount/target are free-form ("5.0 miles", "8 minutes per mile"), so
             // they get no clip ID — that makes `ClipVoiceCoach` fall back to the
             // system voice for this cue, which is exactly what dynamic text needs.
-            var t: [VoiceToken] = [w("step_\(kind.rawValue)", kind.spoken + "."), brk()]
+            // A user-set card name is free-form too; without one the activity has a
+            // real clip, so a plain "Run." stays fully voiced.
+            var t: [VoiceToken] = label.isEmpty
+                ? [activity(act), brk()]
+                : [VoiceToken(clipID: nil, text: label + ". ")]
             t.append(VoiceToken(clipID: nil, text: amount + " "))
             if let target, !target.isEmpty {
                 t.append(w("step_at", "at"))

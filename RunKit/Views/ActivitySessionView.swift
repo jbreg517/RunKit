@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 import CoreLocation
 
-/// Goal semantics for the distance/time completion cue.
+/// Goal semantics for the spoken completion cue.
 enum GoalKind: String, CaseIterable, Identifiable {
     case none, distance, time
     var id: String { rawValue }
@@ -15,6 +15,14 @@ enum GoalKind: String, CaseIterable, Identifiable {
     }
 }
 
+/// Setting up and running a session.
+///
+/// Since v0.45 the setup is a stack of `ActivitySegment` cards — activity, goal,
+/// goal's fields — with a `+` under each. One card with no goal is "just go for a
+/// run"; several cards is a structured workout. There's no separate Custom mode,
+/// because the card stack *is* the custom mode, and the simple case is only the
+/// one-card case. The live engine below runs a single loop over that list rather
+/// than the five parallel run-type paths it replaced.
 struct ActivitySessionView: View {
     @Environment(\.modelContext) private var context
     @Environment(AppRouter.self) private var router
@@ -27,90 +35,105 @@ struct ActivitySessionView: View {
 
     @State private var location = LocationService.shared
     @State private var motion = MotionService.shared
+    @State private var liveHR = LiveHeartRateService.shared
     /// Pedometer reading when the session began, so we can measure the delta.
     @State private var motionStartMeters: Double = 0
 
-    /// Live distance for the running session. GPS when it's on; otherwise the
-    /// pedometer delta since the session started — which is the *expected*
-    /// source for a GPS-off walk/run, not a failure. Cycling has neither, so it
-    /// reports 0 (guarded in setup: a ride can't run distance targets w/o GPS).
-    private var sessionMeters: Double {
-        if session?.usedGPS == true { return location.distanceMeters }
-        guard selectedType.pedometerDistance else { return 0 }
-        return max(0, motion.distanceMeters - motionStartMeters)
-    }
+    // MARK: Setup state
 
-    /// True when the chosen setup measures progress by distance.
-    private var needsDistance: Bool {
-        workoutType == .distance
-            || (workoutType == .custom && steps.contains { $0.basis == .distance })
-    }
-
-    /// Cycling without GPS has no distance source at all, so a distance target
-    /// could never complete. Walk/run still work via the pedometer.
-    private var distanceUnavailable: Bool {
-        needsDistance && !gpsEnabled && !selectedType.pedometerDistance
-    }
-    /// Defaults to Run — the app is run-first and the entry point is "Start run".
-    @State private var selectedType: ActivityType = .run
-
-    // Run-type setup
-    @State private var workoutType: WorkoutType = .free
-    @State private var goalValueText = ""          // distance or time
-    @State private var intWorkText = "30"
-    @State private var intRestText = "90"
-    @State private var intRepsText = "8"
-    @State private var paceText = ""               // "mm:ss" per unit
+    @State private var segments: [ActivitySegment] = ActivitySegment.starter
+    @State private var workoutName = ""
     @State private var showLibrary = false
-    @State private var showBuilder = false
-    // Custom multi-segment workout state.
-    @State private var steps: [WorkoutStep] = []
-    @State private var customName = ""
-    @State private var stepIndex = 0
-    @State private var stepStartElapsed: TimeInterval = 0
-    @State private var stepStartMeters: Double = 0
-    @State private var stepsDone = false
+    @State private var showSaveTemplate = false
+    @State private var templateName = ""
+    /// Name of the picked template or recipe, shown until the cards are edited.
+    @State private var sourceName: String?
     /// Set when this session was launched from a scheduled run, so finishing it
     /// marks that schedule complete.
     @State private var activeScheduleID: UUID?
-    /// Name of the picked `WorkoutRecipe`, shown until the params are edited.
-    @State private var recipeName: String?
     @FocusState private var fieldFocused: Bool
 
-    // Session lifecycle
+    // MARK: Session lifecycle
+
     @State private var session: ActivitySession?
     @State private var startDate: Date?
     /// When the session was paused, and the running total of paused time.
-    /// `elapsed` subtracts `pausedTotal`, so every downstream consumer — the
-    /// interval state machine, goals, pace — freezes for free while paused.
+    /// `elapsed` subtracts `pausedTotal`, so every downstream consumer — the card
+    /// engine, goals, pace — freezes for free while paused.
     @State private var pausedAt: Date?
     @State private var pausedTotal: TimeInterval = 0
     @State private var elapsed: TimeInterval = 0
     @State private var ticker: Timer?
     @State private var countdown: Int?
 
-    // Live derived state
+    // MARK: Live derived state
+
     @State private var mapExpanded = true
     @State private var displayedSpeedMps: Double = 0   // refreshed every 3s, smoothed
     @State private var lastPaceUpdate: TimeInterval = 0
     @State private var announcedUnits = 0
     @State private var goalAnnounced = false
-    @State private var goalTarget: Double = 0          // meters or seconds
+    @State private var lastNudge: TimeInterval = 0
 
-    // Live interval state
-    @State private var intWork = 0.0
-    @State private var intRest = 0.0
-    @State private var intReps = 0
+    // MARK: Card engine state
+
+    @State private var segIndex = 0
+    @State private var segStartElapsed: TimeInterval = 0
+    @State private var segStartMeters: Double = 0
+    @State private var segmentsDone = false
+    /// Seconds spent on each activity, banked as cards finish. A run/walk workout
+    /// burns very differently from either alone, so calories are summed per card
+    /// rather than taken from one session-wide type.
+    @State private var activitySeconds: [String: TimeInterval] = [:]
+    // Intervals sub-machine, scoped to the current card.
     @State private var intPhaseIsWork = true
     @State private var intRep = 1
     @State private var phaseEndsAt: TimeInterval = 0
     @State private var intervalsDone = false
+    /// Zone bounds for the heart-rate goal, resolved once at session start.
+    @State private var zones: [HeartRateZones.Zone] = []
 
-    // Live pace state
-    @State private var paceTargetSecPerMeter = 0.0
-    @State private var lastPaceNudge: TimeInterval = 0
+    private var unitMeters: Double { unit.metersPerUnit }
 
-    private var unitMeters: Double { unit == .metric ? 1000 : 1609.344 }
+    // MARK: - Derived
+
+    private var currentSegment: ActivitySegment? {
+        guard !segmentsDone, segIndex < segments.count else { return nil }
+        return segments[segIndex]
+    }
+
+    /// Activity for the *current* card — drives pace-vs-speed display and cues.
+    private var liveActivity: ActivityType {
+        currentSegment?.activity ?? segments.first?.activity ?? .run
+    }
+
+    /// Activity the session as a whole is filed under in Health and History.
+    private var sessionActivity: ActivityType { segments.first?.activity ?? .run }
+
+    private var workoutType: WorkoutType { ActivitySegment.workoutType(for: segments) }
+
+    /// Live distance. GPS when it's on; otherwise the pedometer delta since the
+    /// session started — the *expected* source for a GPS-off walk/run, not a
+    /// failure. A ride has neither, so it reports 0.
+    private var sessionMeters: Double {
+        if session?.usedGPS == true { return location.distanceMeters }
+        guard segments.contains(where: { $0.activity.pedometerDistance }) else { return 0 }
+        return max(0, motion.distanceMeters - motionStartMeters)
+    }
+
+    private var elapsedInSegment: TimeInterval { elapsed - segStartElapsed }
+    private var metersInSegment: Double { sessionMeters - segStartMeters }
+
+    private var distanceSegments: [ActivitySegment] { segments.filter(\.endsOnDistance) }
+    private var needsDistance: Bool { !distanceSegments.isEmpty }
+
+    /// A ride measures distance only by GPS, so a distance card on a ride with GPS
+    /// off could never complete. Walk/run still work via the pedometer.
+    private var distanceUnavailable: Bool {
+        !gpsEnabled && distanceSegments.contains { !$0.activity.pedometerDistance }
+    }
+
+    // MARK: - Body
 
     var body: some View {
         NavigationStack {
@@ -129,19 +152,7 @@ struct ActivitySessionView: View {
                 if let c = countdown { countdownOverlay(c) }
             }
             .navigationTitle("Activity")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    // Only offered when idle: a running session lives in this
-                    // view's state, so dismissing mid-run would discard it.
-                    if session == nil {
-                        Button("Close") { dismiss() }
-                    }
-                }
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") { fieldFocused = false }
-                }
-            }
+            .toolbar { toolbarContent }
             .interactiveDismissDisabled(session != nil)
             .onAppear {
                 consumePendingWorkout()
@@ -153,66 +164,131 @@ struct ActivitySessionView: View {
         }
     }
 
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            // Only offered when idle: a running session lives in this view's
+            // state, so dismissing mid-run would discard it.
+            if session == nil {
+                Button("Close") { dismiss() }
+            }
+        }
+        ToolbarItemGroup(placement: .keyboard) {
+            Spacer()
+            Button("Done") { fieldFocused = false }
+        }
+    }
+
     /// Applies a workout queued by a template, prebuilt recipe, scheduled run or
     /// History's "Do Again" — once, and only while idle.
     private func consumePendingWorkout() {
         guard session == nil, let p = router.pendingWorkout else { return }
         router.pendingWorkout = nil
-
-        selectedType = p.activityType
-        workoutType = p.workoutType
+        segments = p.resolvedSegments
+        workoutName = p.name
         activeScheduleID = p.scheduleID
-
-        switch p.workoutType {
-        case .distance:
-            let d = unit.distance(p.meters)
-            goalValueText = d == d.rounded() ? String(format: "%.0f", d) : String(format: "%.1f", d)
-        case .time:
-            goalValueText = "\(p.minutes)"
-        case .intervals:
-            intWorkText = "\(p.work)"
-            intRestText = "\(p.rest)"
-            intRepsText = "\(p.reps)"
-        case .custom:
-            steps = p.steps
-            customName = p.name
-        case .free, .pace:
-            break
-        }
-        recipeName = p.name.isEmpty ? nil : p.name
+        sourceName = p.name.isEmpty ? nil : p.name
     }
 
-    // MARK: Setup
+    // MARK: - Setup
 
     private var setup: some View {
         VStack(spacing: RKSpacing.lg) {
-            Toggle("Use GPS (route + distance)", isOn: $gpsEnabled)
-                .tint(RKColor.accent)
-                .padding(.horizontal, RKSpacing.md)
-
-            if selectedType == .ride && !gpsEnabled {
-                Text("Cycling distance needs GPS. Without it this is a timer only.")
-                    .font(RKFont.caption)
-                    .foregroundColor(RKColor.textMuted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, RKSpacing.md)
-            }
-
-            workoutSetup
-
-            if distanceUnavailable {
-                warning("A \(selectedType.rawValue.lowercased()) has no way to measure distance without GPS, so distance targets would never complete. Turn GPS on, or use time-based targets.")
-            } else if needsDistance && !gpsEnabled {
-                warning("GPS is off — distance comes from your step counter, so it's an estimate and there'll be no route map.")
-            }
-
-            Button("Start \(selectedType.rawValue)") { startCountdown() }
-                .buttonStyle(RKPrimaryButtonStyle())
-                .padding(.horizontal, RKSpacing.md)
-                // A custom run with no steps would start and immediately finish;
-                // a distance target with no distance source would never finish.
-                .disabled((workoutType == .custom && steps.isEmpty) || distanceUnavailable)
+            gpsRow
+            libraryRow
+            cardStack
+            setupWarnings
+            startButton
         }
+        .sheet(isPresented: $showLibrary) {
+            WorkoutLibraryView(unit: unit) { apply($0) }
+        }
+        .alert("Save as template", isPresented: $showSaveTemplate) {
+            TextField("Name", text: $templateName)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") { saveTemplate() }
+        } message: {
+            Text("Keeps these \(segments.count) card\(segments.count == 1 ? "" : "s") on your Today screen to run again.")
+        }
+    }
+
+    private var gpsRow: some View {
+        Toggle("Use GPS (route + distance)", isOn: $gpsEnabled)
+            .tint(RKColor.accent)
+            .padding(.horizontal, RKSpacing.md)
+    }
+
+    /// Library entry point. A single row, so the setup stays about the cards.
+    private var libraryRow: some View {
+        Button {
+            fieldFocused = false
+            showLibrary = true
+        } label: {
+            HStack(spacing: RKSpacing.xs) {
+                Image(systemName: "books.vertical.fill")
+                Text(sourceName ?? "Browse workouts")
+                Spacer()
+                Image(systemName: "chevron.right").font(RKFont.caption)
+            }
+            .font(RKFont.caption)
+            .foregroundColor(sourceName == nil ? RKColor.accent : RKColor.textPrimary)
+            .padding(.horizontal, RKSpacing.md)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity)
+            .background(RKColor.surface)
+            .cornerRadius(RKRadius.large)
+        }
+        .padding(.horizontal, RKSpacing.md)
+    }
+
+    /// The cards themselves, each followed by the `+` that adds the next one.
+    private var cardStack: some View {
+        VStack(spacing: RKSpacing.sm) {
+            ForEach(Array(segments.enumerated()), id: \.element.id) { i, _ in
+                SegmentCard(
+                    segment: binding(at: i),
+                    index: i,
+                    unit: unit,
+                    onDelete: segments.count > 1 ? { remove(at: i) } : nil,
+                    onMoveUp: i > 0 ? { move(from: i, to: i - 1) } : nil,
+                    onMoveDown: i < segments.count - 1 ? { move(from: i, to: i + 1) } : nil,
+                    onDuplicate: { duplicate(at: i) })
+
+                AddSegmentButton { insert(after: i) }
+                    .padding(.vertical, 2)
+            }
+
+            if segments.count > 1 {
+                Button {
+                    templateName = workoutName
+                    showSaveTemplate = true
+                } label: {
+                    Label("Save as template", systemImage: "square.and.arrow.down")
+                        .font(RKFont.caption)
+                }
+                .padding(.top, RKSpacing.xs)
+            }
+        }
+        .padding(.horizontal, RKSpacing.md)
+    }
+
+    @ViewBuilder
+    private var setupWarnings: some View {
+        if distanceUnavailable {
+            warning("A ride has no way to measure distance without GPS, so a distance card would never finish. Turn GPS on, or give that card a time goal.")
+        } else if needsDistance && !gpsEnabled {
+            warning("GPS is off — distance comes from your step counter, so it's an estimate and there'll be no route map.")
+        }
+        if segments.contains(where: { $0.goal == .heartRate }) {
+            warning("A heart-rate card needs a Watch recording alongside you. Without one it still runs — it just won't nudge you about zones.")
+        }
+    }
+
+    private var startButton: some View {
+        Button("Start \(sessionActivity.rawValue)") { startCountdown() }
+            .buttonStyle(RKPrimaryButtonStyle())
+            .padding(.horizontal, RKSpacing.md)
+            .disabled(segments.isEmpty || distanceUnavailable)
     }
 
     /// Inline caution about a setup that can't measure what it needs.
@@ -232,318 +308,175 @@ struct ActivitySessionView: View {
         .padding(.horizontal, RKSpacing.md)
     }
 
-    private var workoutSetup: some View {
-        VStack(alignment: .leading, spacing: RKSpacing.sm) {
-            HStack {
-                Text("Activity Type").font(RKFont.heading).foregroundColor(RKColor.textPrimary)
-                Spacer()
-                // Walk and Ride sit alongside the run types in one menu. The
-                // explicit binding (rather than `.onChange`) matters because
-                // `apply(_:)` also sets the type, and onChange would fire after
-                // it and wipe the recipe name.
-                Picker("Activity Type", selection: Binding(
-                    get: { activityChoice },
-                    set: { setActivityChoice($0); recipeName = nil }
-                )) {
-                    ForEach(ActivityChoice.allCases) { c in
-                        Label(c.label, systemImage: c.sfSymbol).tag(c)
-                    }
-                }
-                .pickerStyle(.menu)
-                .tint(RKColor.accent)
-            }
+    // MARK: Card list editing
 
-            // Library entry point. Kept as a single row so the setup card stays
-            // light — the catalog itself lives in a sheet.
-            Button {
-                fieldFocused = false
-                showLibrary = true
-            } label: {
-                HStack(spacing: RKSpacing.xs) {
-                    Image(systemName: "books.vertical.fill")
-                    Text(recipeName ?? "Browse workouts")
-                    Spacer()
-                    Image(systemName: "chevron.right").font(RKFont.caption)
-                }
-                .font(RKFont.caption)
-                .foregroundColor(recipeName == nil ? RKColor.accent : RKColor.textPrimary)
-                .padding(.horizontal, RKSpacing.sm)
-                .padding(.vertical, 9)
-                .frame(maxWidth: .infinity)
-                .background(RKColor.surfaceElevated)
-                .cornerRadius(RKRadius.small)
-            }
-
-            switch workoutType {
-            case .free:
-                Text("Open session — no target.")
-                    .font(RKFont.caption).foregroundColor(RKColor.textMuted)
-            case .distance:
-                HStack {
-                    TextField("0.0", text: $goalValueText)
-                        .keyboardType(.decimalPad).textFieldStyle(.roundedBorder).focused($fieldFocused)
-                    Text(unit.distanceUnit).foregroundColor(RKColor.textSecondary)
-                }
-            case .time:
-                HStack {
-                    TextField("0", text: $goalValueText)
-                        .keyboardType(.numberPad).textFieldStyle(.roundedBorder).focused($fieldFocused)
-                    Text("min").foregroundColor(RKColor.textSecondary)
-                }
-            case .intervals:
-                intervalsSetup
-            case .pace:
-                HStack {
-                    TextField("5:30", text: $paceText)
-                        .keyboardType(.numbersAndPunctuation).textFieldStyle(.roundedBorder).focused($fieldFocused)
-                    Text("min \(unit.paceUnit)").foregroundColor(RKColor.textSecondary)
-                }
-            case .custom:
-                customSetup
-            }
-        }
-        .padding(RKSpacing.md)
-        .background(RKColor.surface)
-        .cornerRadius(RKRadius.large)
-        .padding(.horizontal, RKSpacing.md)
-        .sheet(isPresented: $showLibrary) {
-            WorkoutLibraryView(unit: unit) { apply($0) }
-        }
-        .sheet(isPresented: $showBuilder) {
-            WorkoutBuilderView(unit: unit) { built, name in
-                steps = built
-                customName = name
-                workoutType = .custom
-                recipeName = name.isEmpty ? nil : name
-            }
-        }
+    /// Index-based binding rather than `ForEach($segments)`, so the row also gets
+    /// its position for the number badge and the move controls.
+    ///
+    /// Deliberately does *not* clear `sourceName`: the card writes its parsed text
+    /// back on appear, so clearing here would wipe the name of a workout the
+    /// instant it loaded. Only structural edits drop the name.
+    private func binding(at i: Int) -> Binding<ActivitySegment> {
+        Binding(
+            get: { i < segments.count ? segments[i] : ActivitySegment() },
+            set: {
+                guard i < segments.count else { return }
+                segments[i] = $0
+            })
     }
 
-    /// Walk and Ride are whole activities; the rest are run structures. Flattening
-    /// them into one menu keeps the setup card to a single control.
-    enum ActivityChoice: Hashable, Identifiable, CaseIterable {
-        case walk, ride
-        case run(WorkoutType)
-
-        static var allCases: [ActivityChoice] {
-            [.walk, .ride] + WorkoutType.allCases.map { .run($0) }
-        }
-
-        var id: String {
-            switch self {
-            case .walk:       return "walk"
-            case .ride:       return "ride"
-            case let .run(t): return "run-\(t.rawValue)"
-            }
-        }
-
-        var label: String {
-            switch self {
-            case .walk:          return "Walk"
-            case .ride:          return "Ride"
-            case let .run(t):    return t == .free ? "Run" : "Run · \(t.label)"
-            }
-        }
-
-        var sfSymbol: String {
-            switch self {
-            case .walk:       return ActivityType.walk.sfSymbol
-            case .ride:       return ActivityType.ride.sfSymbol
-            case let .run(t): return t == .free ? ActivityType.run.sfSymbol : t.sfSymbol
-            }
-        }
+    private func insert(after i: Int) {
+        fieldFocused = false
+        var next = ActivitySegment.added
+        next.activity = segments[min(i, segments.count - 1)].activity
+        segments.insert(next, at: i + 1)
+        sourceName = nil
     }
 
-    private var activityChoice: ActivityChoice {
-        switch selectedType {
-        case .walk: return .walk
-        case .ride: return .ride
-        case .run:  return .run(workoutType)
-        }
+    private func duplicate(at i: Int) {
+        guard i < segments.count else { return }
+        var copy = segments[i]
+        copy.id = UUID()
+        segments.insert(copy, at: i + 1)
+        sourceName = nil
     }
 
-    private func setActivityChoice(_ c: ActivityChoice) {
-        switch c {
-        case .walk:
-            selectedType = .walk
-            workoutType = .free
-        case .ride:
-            selectedType = .ride
-            workoutType = .free
-        case let .run(t):
-            selectedType = .run
-            workoutType = t
-        }
+    private func remove(at i: Int) {
+        guard segments.count > 1, i < segments.count else { return }
+        segments.remove(at: i)
+        sourceName = nil
     }
 
-    /// Custom workout: a compact preview of the step list plus an edit entry point.
-    private var customSetup: some View {
-        VStack(alignment: .leading, spacing: RKSpacing.sm) {
-            if steps.isEmpty {
-                Text("Build a sequence of steps — warm-up, work at a target pace, cool-down.")
-                    .font(RKFont.caption).foregroundColor(RKColor.textMuted)
-            } else {
-                ForEach(Array(steps.enumerated()), id: \.element.id) { i, step in
-                    HStack(spacing: RKSpacing.sm) {
-                        Text("\(i + 1)")
-                            .font(RKFont.caption).foregroundColor(RKColor.textMuted)
-                            .frame(width: 16, alignment: .trailing)
-                        Image(systemName: step.kind.sfSymbol)
-                            .font(RKFont.caption)
-                            .foregroundColor(step.kind == .work ? RKColor.accent : RKColor.textMuted)
-                        Text(step.kind.label)
-                            .font(RKFont.caption).foregroundColor(RKColor.textSecondary)
-                        Spacer()
-                        Text(step.summary(unit))
-                            .font(RKFont.caption).foregroundColor(RKColor.textPrimary)
-                    }
-                }
-            }
-            Button {
-                fieldFocused = false
-                showBuilder = true
-            } label: {
-                Label(steps.isEmpty ? "Build workout" : "Edit steps",
-                      systemImage: "slider.horizontal.3")
-                    .font(RKFont.caption)
-            }
-            .padding(.top, 2)
-        }
+    private func move(from: Int, to: Int) {
+        guard from < segments.count, to >= 0, to < segments.count else { return }
+        segments.swapAt(from, to)
+        sourceName = nil
     }
 
-    /// Load a library workout into the setup fields. Everything a recipe sets is
-    /// still editable afterwards — picking one is a starting point, not a lock.
+    /// Load a library workout into the cards. Everything a recipe sets stays
+    /// editable — picking one is a starting point, not a lock.
     private func apply(_ r: WorkoutRecipe) {
-        workoutType = r.workoutType
-        switch r.workoutType {
-        case .distance:
-            let d = unit.distance(r.meters)
-            goalValueText = d == d.rounded() ? String(format: "%.0f", d) : String(format: "%.1f", d)
-        case .time:
-            goalValueText = "\(r.minutes)"
-        case .intervals:
-            intWorkText = "\(r.work)"
-            intRestText = "\(r.rest)"
-            intRepsText = "\(r.reps)"
-        case .free, .pace, .custom:
-            break   // library recipes never carry pace targets or step lists
-        }
-        recipeName = r.name
+        let built = ActivitySegment.from(recipe: r)
+        segments = built.isEmpty ? ActivitySegment.starter : built
+        workoutName = r.name
+        sourceName = r.name
     }
 
-    private var intervalsSetup: some View {
-        VStack(alignment: .leading, spacing: RKSpacing.sm) {
-            HStack(spacing: RKSpacing.sm) {
-                fieldBox("Work", $intWorkText, "sec")
-                fieldBox("Rest", $intRestText, "sec")
-                fieldBox("Reps", $intRepsText, "×")
-            }
-            HStack(spacing: RKSpacing.sm) {
-                ForEach(IntervalPreset.all) { p in
-                    Button(p.name) {
-                        intWorkText = "\(p.work)"; intRestText = "\(p.rest)"; intRepsText = "\(p.reps)"
-                    }
-                    .font(RKFont.caption)
-                    .padding(.horizontal, RKSpacing.sm).padding(.vertical, 6)
-                    .background(RKColor.surfaceElevated)
-                    .foregroundColor(RKColor.textPrimary)
-                    .cornerRadius(RKRadius.small)
-                }
-            }
-        }
+    private func saveTemplate() {
+        let name = templateName.trimmingCharacters(in: .whitespaces)
+        workoutName = name
+        context.insert(CustomWorkout(name: name.isEmpty ? "Untitled" : name, segments: segments))
+        try? context.save()
     }
 
-    private func fieldBox(_ label: String, _ text: Binding<String>, _ suffix: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(RKFont.caption).foregroundColor(RKColor.textMuted)
-            HStack(spacing: 3) {
-                TextField("0", text: text)
-                    .keyboardType(.numberPad).textFieldStyle(.roundedBorder).focused($fieldFocused)
-                Text(suffix).font(RKFont.caption).foregroundColor(RKColor.textSecondary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: Live
+    // MARK: - Live
 
     private var live: some View {
         VStack(spacing: RKSpacing.lg) {
             if session?.usedGPS == true { mapCard }
-            if workoutType == .intervals { intervalBanner }
-            if workoutType == .custom { stepBanner }
-
-            VStack(spacing: RKSpacing.xs) {
-                Text(timeString(elapsed))
-                    .font(.system(size: 60, weight: .black, design: .monospaced))
-                    .foregroundColor(pausedAt == nil ? RKColor.textPrimary : RKColor.textMuted)
-                    .contentTransition(.numericText())
-                if pausedAt != nil {
-                    Text("PAUSED")
-                        .font(RKFont.caption).bold()
-                        .foregroundColor(RKColor.accent)
-                }
-            }
-
-            if workoutType == .pace { paceBanner }
+            liveBanners
+            clock
             metricsRow
-            if workoutType == .distance || workoutType == .time { goalProgress }
+            if currentSegment?.endBasis != nil { goalProgress }
+            liveControls
+        }
+    }
 
+    @ViewBuilder
+    private var liveBanners: some View {
+        if let seg = currentSegment {
+            if seg.goal == .intervals { intervalBanner }
+            segmentBanner
+            if seg.goal == .pace { paceBanner(seg) }
+            if seg.goal == .heartRate { heartRateBanner(seg) }
+        } else if segmentsDone {
+            segmentBanner
+        }
+    }
+
+    private var clock: some View {
+        VStack(spacing: RKSpacing.xs) {
+            Text(timeString(elapsed))
+                .font(.system(size: 60, weight: .black, design: .monospaced))
+                .foregroundColor(pausedAt == nil ? RKColor.textPrimary : RKColor.textMuted)
+                .contentTransition(.numericText())
+            if pausedAt != nil {
+                Text("PAUSED")
+                    .font(RKFont.caption).bold()
+                    .foregroundColor(RKColor.accent)
+            }
+        }
+    }
+
+    private var liveControls: some View {
+        VStack(spacing: RKSpacing.sm) {
+            if segments.count > 1 && !segmentsDone {
+                Button("Next card") { advanceSegment() }
+                    .buttonStyle(RKSecondaryButtonStyle())
+            }
             HStack(spacing: RKSpacing.sm) {
                 Button(pausedAt == nil ? "Pause" : "Resume") { togglePause() }
                     .buttonStyle(RKSecondaryButtonStyle())
                 Button("Finish") { finish() }
                     .buttonStyle(RKPrimaryButtonStyle())
             }
-            .padding(.horizontal, RKSpacing.md)
         }
+        .padding(.horizontal, RKSpacing.md)
     }
 
-    /// Current step, what's left of it, and what's next.
-    private var stepBanner: some View {
-        let step = (stepIndex < steps.count && !stepsDone) ? steps[stepIndex] : nil
-        let remaining: String = {
-            guard let step else { return "" }
-            switch step.basis {
-            case .time:
-                return timeString(max(0, step.seconds - (elapsed - stepStartElapsed)))
-            case .distance:
-                let left = max(0, step.meters - (sessionMeters - stepStartMeters))
-                return unit.distanceString(left)
-            }
-        }()
+    /// Current card, what's left of it, and what's next.
+    private var segmentBanner: some View {
+        let seg = currentSegment
+        let isWork = seg.map { $0.goal != ActivitySegment.Goal.none } ?? false
         return VStack(spacing: RKSpacing.xs) {
-            Text(stepsDone ? "DONE" : (step?.kind.label.uppercased() ?? ""))
-                .font(.system(size: 28, weight: .black))
-                .foregroundColor(step?.kind == .work && !stepsDone ? RKColor.accent : RKColor.textSecondary)
-            if let step, !stepsDone {
-                Text("\(remaining) left  ·  Step \(stepIndex + 1) of \(steps.count)")
+            Text(segmentsDone ? "DONE" : (seg.map { headline($0) } ?? ""))
+                .font(.system(size: 26, weight: .black))
+                .multilineTextAlignment(.center)
+                .foregroundColor(isWork && !segmentsDone ? RKColor.accent : RKColor.textSecondary)
+            if let seg, !segmentsDone {
+                Text(remainingText(seg))
                     .font(RKFont.caption).foregroundColor(RKColor.textMuted)
-                if step.hasPaceTarget {
-                    Text("Target \(step.targetText(unit).replacingOccurrences(of: "@ ", with: ""))")
-                        .font(RKFont.caption).foregroundColor(RKColor.textSecondary)
-                }
-                if stepIndex + 1 < steps.count {
-                    Text("Next: \(steps[stepIndex + 1].kind.label) · \(steps[stepIndex + 1].summary(unit))")
+                if segIndex + 1 < segments.count {
+                    Text("Next: \(headline(segments[segIndex + 1])) · \(segments[segIndex + 1].summary(unit))")
                         .font(RKFont.caption).foregroundColor(RKColor.textMuted)
                 }
             }
         }
         .frame(maxWidth: .infinity)
         .padding(RKSpacing.md)
-        .background((step?.kind == .work && !stepsDone) ? RKColor.accent.opacity(0.15) : RKColor.surface)
+        .background((isWork && !segmentsDone) ? RKColor.accent.opacity(0.15) : RKColor.surface)
         .cornerRadius(RKRadius.large)
         .padding(.horizontal, RKSpacing.md)
     }
 
+    private func headline(_ seg: ActivitySegment) -> String {
+        seg.label.trimmingCharacters(in: .whitespaces).isEmpty
+            ? seg.activity.rawValue.uppercased()
+            : seg.label.uppercased()
+    }
+
+    /// "3:42 left · Card 2 of 4", or the open-card equivalent.
+    private func remainingText(_ seg: ActivitySegment) -> String {
+        let position = segments.count > 1 ? "  ·  Card \(segIndex + 1) of \(segments.count)" : ""
+        guard let end = seg.endBasis else {
+            if seg.goal == .intervals { return seg.summary(unit) + position }
+            return (segments.count > 1 ? "Open" : "No target") + position
+        }
+        if end == .distance {
+            return unit.distanceString(max(0, seg.endMeters - metersInSegment)) + " left" + position
+        }
+        return timeString(max(0, seg.endSeconds - elapsedInSegment)) + " left" + position
+    }
+
     private var intervalBanner: some View {
         let remaining = max(0, Int((phaseEndsAt - elapsed).rounded()))
+        let reps = currentSegment?.reps ?? 0
         return VStack(spacing: RKSpacing.xs) {
-            Text(intervalsDone ? "DONE" : (intPhaseIsWork ? "WORK" : "REST"))
+            Text(intervalsDone ? "INTERVALS DONE" : (intPhaseIsWork ? "WORK" : "REST"))
                 .font(.system(size: 30, weight: .black))
                 .foregroundColor(intPhaseIsWork && !intervalsDone ? RKColor.accent : RKColor.textSecondary)
             if !intervalsDone {
-                Text("Rep \(intRep) of \(intReps)  ·  \(remaining)s")
+                Text("Rep \(intRep) of \(reps)  ·  \(remaining)s")
                     .font(RKFont.caption).foregroundColor(RKColor.textMuted)
             }
         }
@@ -554,29 +487,13 @@ struct ActivitySessionView: View {
         .padding(.horizontal, RKSpacing.md)
     }
 
-    private var paceBanner: some View {
-        let targetPerUnit = paceTargetSecPerMeter * unitMeters
-        let curPerUnit = displayedSpeedMps > 0.2 ? unitMeters / displayedSpeedMps : 0
-        let state: (String, Color) = {
-            guard curPerUnit > 0, targetPerUnit > 0 else { return ("—", RKColor.textMuted) }
-            let r = curPerUnit / targetPerUnit
-            if r > 1.08 { return ("Pick it up", RKColor.danger) }
-            if r < 0.92 { return ("Ease off", RKColor.accent) }
-            return ("On pace", RKColor.success)
-        }()
+    private func paceBanner(_ seg: ActivitySegment) -> some View {
+        let target = seg.paceTargetSecPerMeter * unitMeters
+        let current = displayedSpeedMps > 0.2 ? unitMeters / displayedSpeedMps : 0
+        let state = paceState(current: current, target: target)
         return VStack(alignment: .leading, spacing: RKSpacing.sm) {
-            HStack {
-                Text("Target").font(RKFont.caption).foregroundColor(RKColor.textMuted)
-                Spacer()
-                Text(unit.paceString(secondsPerUnit: targetPerUnit))
-                    .font(RKFont.bodyBold).foregroundColor(RKColor.textPrimary)
-            }
-            HStack {
-                Text("You").font(RKFont.caption).foregroundColor(RKColor.textMuted)
-                Spacer()
-                Text(curPerUnit > 0 ? unit.paceString(secondsPerUnit: curPerUnit) : "—")
-                    .font(RKFont.bodyBold).foregroundColor(state.1)
-            }
+            targetRow("Target", unit.paceString(secondsPerUnit: target), RKColor.textPrimary)
+            targetRow("You", current > 0 ? unit.paceString(secondsPerUnit: current) : "—", state.1)
             Text(state.0).font(RKFont.bodyBold).foregroundColor(state.1)
                 .frame(maxWidth: .infinity, alignment: .center)
         }
@@ -584,6 +501,54 @@ struct ActivitySessionView: View {
         .background(RKColor.surface)
         .cornerRadius(RKRadius.large)
         .padding(.horizontal, RKSpacing.md)
+    }
+
+    private func paceState(current: Double, target: Double) -> (String, Color) {
+        guard current > 0, target > 0 else { return ("—", RKColor.textMuted) }
+        let r = current / target
+        if r > 1.08 { return ("Pick it up", RKColor.danger) }
+        if r < 0.92 { return ("Ease off", RKColor.accent) }
+        return ("On pace", RKColor.success)
+    }
+
+    private func heartRateBanner(_ seg: ActivitySegment) -> some View {
+        let zone = zones.first { $0.index == seg.hrZone }
+        let bpm = liveHR.bpm
+        let state = hrState(bpm: bpm, zone: zone)
+        return VStack(alignment: .leading, spacing: RKSpacing.sm) {
+            targetRow("Target", zoneRangeText(zone, name: HeartRateZones.zoneName(seg.hrZone)),
+                      RKColor.textPrimary)
+            targetRow("You", bpm > 0 ? "\(Int(bpm)) bpm" : "—", state.1)
+            Text(state.0).font(RKFont.bodyBold).foregroundColor(state.1)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(RKSpacing.md)
+        .background(RKColor.surface)
+        .cornerRadius(RKRadius.large)
+        .padding(.horizontal, RKSpacing.md)
+    }
+
+    private func zoneRangeText(_ zone: HeartRateZones.Zone?, name: String) -> String {
+        guard let zone else { return name }
+        return "\(name) · \(Int(zone.lower))–\(Int(zone.upper))"
+    }
+
+    private func hrState(bpm: Double, zone: HeartRateZones.Zone?) -> (String, Color) {
+        guard bpm > 0 else { return ("Waiting for a heart-rate source", RKColor.textMuted) }
+        guard let zone else { return ("No zones — set your max HR in Settings", RKColor.textMuted) }
+        if bpm < zone.lower { return ("Pick it up", RKColor.danger) }
+        if bpm > zone.upper { return ("Ease off", RKColor.accent) }
+        return ("In zone", RKColor.success)
+    }
+
+    private func targetRow(_ label: String, _ value: String, _ color: Color) -> some View {
+        HStack {
+            Text(label).font(RKFont.caption).foregroundColor(RKColor.textMuted)
+            Spacer()
+            Text(value)
+                .font(RKFont.bodyBold).foregroundColor(color)
+                .lineLimit(1).minimumScaleFactor(0.6)
+        }
     }
 
     private var mapCard: some View {
@@ -617,8 +582,8 @@ struct ActivitySessionView: View {
     private var metricsRow: some View {
         HStack(spacing: RKSpacing.md) {
             metric(unit.distanceString(sessionMeters), "Distance")
-            metric(currentPaceString, session?.type == .ride ? "Cur Speed" : "Cur Pace")
-            metric(overallPaceString, session?.type == .ride ? "Avg Speed" : "Avg Pace")
+            metric(currentPaceString, liveActivity == .ride ? "Cur Speed" : "Cur Pace")
+            metric(overallPaceString, liveActivity == .ride ? "Avg Speed" : "Avg Pace")
         }
         .padding(.horizontal, RKSpacing.md)
     }
@@ -640,7 +605,8 @@ struct ActivitySessionView: View {
     private var goalProgress: some View {
         VStack(alignment: .leading, spacing: RKSpacing.sm) {
             HStack {
-                Text("Goal").font(RKFont.bodyBold).foregroundColor(RKColor.textPrimary)
+                Text(segments.count > 1 ? "Card \(segIndex + 1)" : "Goal")
+                    .font(RKFont.bodyBold).foregroundColor(RKColor.textPrimary)
                 Spacer()
                 Text(goalLabel()).font(RKFont.caption).foregroundColor(RKColor.textSecondary)
             }
@@ -663,35 +629,37 @@ struct ActivitySessionView: View {
         }
     }
 
-    // MARK: Derived strings
+    // MARK: - Derived strings
 
     private var currentPaceString: String {
         guard displayedSpeedMps > 0.2 else { return "--" }
-        if session?.type == .ride { return unit.speedString(metersPerSecond: displayedSpeedMps) }
+        if liveActivity == .ride { return unit.speedString(metersPerSecond: displayedSpeedMps) }
         return unit.paceString(secondsPerUnit: unitMeters / displayedSpeedMps)
     }
 
     private var overallPaceString: String {
         let d = sessionMeters
-        if session?.type == .ride { return unit.speedString(seconds: elapsed, meters: d) }
+        if liveActivity == .ride { return unit.speedString(seconds: elapsed, meters: d) }
         return unit.paceString(seconds: elapsed, meters: d)
     }
 
     private func goalFraction() -> Double {
-        guard goalTarget > 0 else { return 0 }
-        let value = workoutType == .distance ? sessionMeters : elapsed
-        return min(1, value / goalTarget)
+        guard let seg = currentSegment, let end = seg.endBasis else { return 0 }
+        if end == .distance {
+            return seg.endMeters > 0 ? min(1, metersInSegment / seg.endMeters) : 0
+        }
+        return seg.endSeconds > 0 ? min(1, elapsedInSegment / seg.endSeconds) : 0
     }
 
     private func goalLabel() -> String {
-        switch workoutType {
-        case .distance: return "\(unit.distanceString(sessionMeters)) / \(unit.distanceString(goalTarget))"
-        case .time:     return "\(timeString(elapsed)) / \(timeString(goalTarget))"
-        default:        return ""
+        guard let seg = currentSegment, let end = seg.endBasis else { return "" }
+        if end == .distance {
+            return "\(unit.distanceString(metersInSegment)) / \(unit.distanceString(seg.endMeters))"
         }
+        return "\(timeString(elapsedInSegment)) / \(timeString(seg.endSeconds))"
     }
 
-    // MARK: Lifecycle
+    // MARK: - Lifecycle
 
     /// 3-2-1 visual countdown, then the session begins.
     private func startCountdown() {
@@ -702,8 +670,6 @@ struct ActivitySessionView: View {
             if c <= 1 {
                 timer.invalidate()
                 withAnimation { countdown = nil }
-                // Intervals announce "Work! Rep 1" themselves, so skip the generic "Go".
-                if voiceOn && workoutType != .intervals { SpeechService.shared.speak(.go) }
                 beginActiveSession()
             } else {
                 withAnimation { countdown = c - 1 }
@@ -713,10 +679,10 @@ struct ActivitySessionView: View {
     }
 
     private func beginActiveSession() {
-        let s = ActivitySession(type: selectedType)
+        let s = ActivitySession(type: sessionActivity)
         s.usedGPS = gpsEnabled
         s.workoutTypeRaw = workoutType.rawValue
-        resolveWorkoutParams(into: s)
+        snapshotSetup(into: s)
 
         context.insert(s)
         session = s
@@ -724,42 +690,26 @@ struct ActivitySessionView: View {
         elapsed = 0
         pausedAt = nil
         pausedTotal = 0
-        // Baseline the pedometer so `sessionMeters` can measure the delta when
-        // GPS is off. Updates were started in `onAppear`, so by the time the user
-        // has configured and started a session the reading is already live.
+        // Baseline the pedometer so `sessionMeters` can measure the delta when GPS
+        // is off. Updates were started in `onAppear`, so by the time the user has
+        // configured and started a session the reading is already live.
         motionStartMeters = motion.distanceMeters
         displayedSpeedMps = 0
         lastPaceUpdate = 0
         announcedUnits = 0
         goalAnnounced = false
-        lastPaceNudge = 0
+        lastNudge = 0
+        resetSegmentEngine()
 
-        if gpsEnabled {
-            if location.authorization == .notDetermined { location.requestPermission() }
-            location.onPoint = { loc, estimated in
-                let p = RoutePoint(
-                    timestamp: loc.timestamp,
-                    latitude: loc.coordinate.latitude,
-                    longitude: loc.coordinate.longitude,
-                    altitude: loc.altitude,
-                    horizontalAccuracy: loc.horizontalAccuracy,
-                    speed: max(0, loc.speed),
-                    isEstimated: estimated
-                )
-                p.session = s
-                context.insert(p)
-            }
-            location.startTracking()
+        if gpsEnabled { startLocation(for: s) }
+        if segments.contains(where: { $0.goal == .heartRate }) {
+            liveHR.start()
+            Task { await loadZones() }
         }
 
-        if workoutType == .intervals, voiceOn {
-            SpeechService.shared.speak(intReps <= 1 ? .intervalLast : .intervalWork(rep: 1, total: intReps))
-        }
-        if workoutType == .custom, let first = steps.first {
-            announceStep(first)
-        }
-
-        LiveActivityManager.shared.start(label: selectedType.rawValue, startDate: startDate ?? Date(),
+        announceStart()
+        LiveActivityManager.shared.start(label: sessionActivity.rawValue,
+                                         startDate: startDate ?? Date(),
                                          distanceText: unit.distanceString(sessionMeters),
                                          detail: liveDetail())
 
@@ -768,56 +718,88 @@ struct ActivitySessionView: View {
         RunLoop.main.add(t, forMode: .common)
     }
 
-    /// Reads the setup text fields into `@State` + the session's stored params.
-    private func resolveWorkoutParams(into s: ActivitySession) {
-        goalTarget = 0
-        switch workoutType {
-        case .free:
-            break
+    private func startLocation(for s: ActivitySession) {
+        if location.authorization == .notDetermined { location.requestPermission() }
+        location.onPoint = { loc, estimated in
+            let p = RoutePoint(
+                timestamp: loc.timestamp,
+                latitude: loc.coordinate.latitude,
+                longitude: loc.coordinate.longitude,
+                altitude: loc.altitude,
+                horizontalAccuracy: loc.horizontalAccuracy,
+                speed: max(0, loc.speed),
+                isEstimated: estimated
+            )
+            p.session = s
+            context.insert(p)
+        }
+        location.startTracking()
+    }
+
+    /// Snapshots the cards onto the session so history still shows what was run
+    /// even if a saved template is later edited or deleted. The flat fields are
+    /// filled in only for a single-card session, where they're unambiguous —
+    /// that's what Stats and the exporter read.
+    private func snapshotSetup(into s: ActivitySession) {
+        s.customStepsJSON = ActivitySegment.encode(segments)
+        s.customWorkoutName = workoutName
+        guard segments.count == 1, let seg = segments.first else { return }
+        switch seg.goal {
         case .distance:
-            goalTarget = unit.meters(fromDisplay: goalValueText) ?? 0
-            s.goalKind = "distance"; s.goalTarget = goalTarget
+            s.goalKind = "distance"; s.goalTarget = seg.endMeters
         case .time:
-            goalTarget = (Double(goalValueText) ?? 0) * 60
-            s.goalKind = "time"; s.goalTarget = goalTarget
+            s.goalKind = "time"; s.goalTarget = seg.endSeconds
         case .intervals:
-            intWork = Double(max(1, Int(intWorkText) ?? 0))
-            intRest = Double(max(0, Int(intRestText) ?? 0))
-            intReps = max(1, Int(intRepsText) ?? 1)
-            intRep = 1; intPhaseIsWork = true; intervalsDone = false; phaseEndsAt = intWork
-            s.intervalWork = intWork; s.intervalRest = intRest; s.intervalReps = intReps
+            s.intervalWork = Double(seg.work)
+            s.intervalRest = Double(seg.rest)
+            s.intervalReps = seg.reps
         case .pace:
-            paceTargetSecPerMeter = parsePace(paceText)
-            s.paceTargetSecPerMeter = paceTargetSecPerMeter
-        case .custom:
-            stepIndex = 0
-            stepStartElapsed = 0
-            stepStartMeters = 0
-            stepsDone = steps.isEmpty
-            // Snapshot the steps onto the session so history still shows what was
-            // run even if the saved workout is later edited or deleted.
-            s.customStepsJSON = WorkoutStep.encode(steps)
-            s.customWorkoutName = customName
+            s.paceTargetSecPerMeter = seg.paceTargetSecPerMeter
+        case .none, .heartRate:
+            break
         }
     }
 
-    /// "mm:ss" (or plain minutes) per unit → seconds per meter.
-    private func parsePace(_ s: String) -> Double {
-        let parts = s.split(separator: ":")
-        var perUnit = 0.0
-        if parts.count == 2, let m = Double(parts[0]), let sec = Double(parts[1]) {
-            perUnit = m * 60 + sec
-        } else if let m = Double(s.replacingOccurrences(of: ",", with: ".")) {
-            perUnit = m * 60
-        }
-        return perUnit > 0 ? perUnit / unitMeters : 0
+    private func resetSegmentEngine() {
+        segIndex = 0
+        segStartElapsed = 0
+        segStartMeters = 0
+        segmentsDone = segments.isEmpty
+        activitySeconds = [:]
+        startIntervalsIfNeeded()
     }
 
-    /// Once-a-second update: timer, smoothed pace, unit marks, and run-type logic.
+    /// Resolves the zone bounds a heart-rate card is judged against. Uses the
+    /// runner's own resting HR when Health has one — plain %max misstates the low
+    /// zones badly, which is exactly where an easy-zone card lives.
+    private func loadZones() async {
+        let resting = await HealthService.shared.latestRestingHeartRate()
+        let maxHR = HeartRateZones.maxHeartRate(
+            override: maxHeartRateOverride,
+            observed: nil,
+            age: SuiteProfileStore.load()?.age ?? 0)
+        zones = HeartRateZones.zones(maxHR: maxHR, restingHR: resting)
+    }
+
+    private func announceStart() {
+        guard voiceOn else { return }
+        if let first = segments.first, first.goal == .intervals {
+            SpeechService.shared.speak(first.reps <= 1 ? .intervalLast
+                                                       : .intervalWork(rep: 1, total: first.reps))
+        } else if segments.count > 1, let first = segments.first {
+            announceSegment(first)
+        } else {
+            SpeechService.shared.speak(.go)
+        }
+    }
+
+    // MARK: - The tick
+
+    /// Once-a-second update: timer, smoothed pace, unit marks, and the card engine.
     private func tick() {
         guard let start = startDate else { return }
-        // Paused: freeze the clock. Everything keyed off `elapsed` (intervals,
-        // goals, pace nudges, unit marks) stops with it.
+        // Paused: freeze the clock. Everything keyed off `elapsed` — the card
+        // engine, goals, pace nudges, unit marks — stops with it.
         guard pausedAt == nil else { return }
         elapsed = Date().timeIntervalSince(start) - pausedTotal
 
@@ -834,67 +816,200 @@ struct ActivitySessionView: View {
             }
         }
 
-        switch workoutType {
-        case .intervals: tickIntervals()
-        case .pace:      tickPace()
-        case .custom:    tickCustom()
-        case .distance, .time:
-            if !goalAnnounced, goalTarget > 0, goalFraction() >= 1 {
-                goalAnnounced = true
-                if voiceOn {
-                    let gk: GoalKind = workoutType == .time ? .time : .distance
-                    SpeechService.shared.speak(.goalReached(gk, target: goalTarget, unit: unit,
-                                                            motivationIndex: Motivation.goalIndex()))
-                }
-            }
-        case .free:
-            break
-        }
+        tickSegment()
 
         if Int(elapsed) % 10 == 0 { pushLiveActivity() }
     }
 
-    private func tickIntervals() {
+    /// One loop for every kind of card: intervals run their own rep machine, and
+    /// everything else either finishes on its basis or gets nudged toward target.
+    private func tickSegment() {
+        guard let seg = currentSegment else { return }
+
+        if seg.goal == .intervals {
+            tickIntervals(seg)
+            return
+        }
+
+        // No end basis means an open card — only Next moves it on.
+        var finished = false
+        if let end = seg.endBasis {
+            finished = end == .distance ? metersInSegment >= seg.endMeters
+                                        : elapsedInSegment >= seg.endSeconds
+        }
+
+        if finished {
+            advanceSegment()
+        } else if seg.goal == .pace {
+            nudgeTowardPace(seg.paceTargetSecPerMeter)
+        } else if seg.goal == .heartRate {
+            nudgeTowardZone(seg.hrZone)
+        }
+    }
+
+    private func startIntervalsIfNeeded() {
+        guard let seg = currentSegment, seg.goal == .intervals else { return }
+        intRep = 1
+        intPhaseIsWork = true
+        intervalsDone = false
+        phaseEndsAt = elapsed + Double(max(1, seg.work))
+    }
+
+    private func tickIntervals(_ seg: ActivitySegment) {
         guard !intervalsDone, elapsed >= phaseEndsAt else { return }
         if intPhaseIsWork {
-            if intRep >= intReps {
+            if intRep >= seg.reps {
                 intervalsDone = true
                 if voiceOn { SpeechService.shared.speak(.intervalsComplete) }
-                pushLiveActivity()
+                advanceSegment()
                 return
             }
             intPhaseIsWork = false
-            phaseEndsAt = elapsed + intRest
+            phaseEndsAt = elapsed + Double(max(0, seg.rest))
             if voiceOn { SpeechService.shared.speak(.intervalRest) }
         } else {
             intRep += 1
             intPhaseIsWork = true
-            phaseEndsAt = elapsed + intWork
+            phaseEndsAt = elapsed + Double(max(1, seg.work))
             if voiceOn {
-                SpeechService.shared.speak(intRep >= intReps ? .intervalLast
-                                                             : .intervalWork(rep: intRep, total: intReps))
+                SpeechService.shared.speak(intRep >= seg.reps ? .intervalLast
+                                                              : .intervalWork(rep: intRep, total: seg.reps))
             }
         }
         pushLiveActivity()
     }
 
+    /// Moves to the next card, banking the finished one's time against its
+    /// activity so calories can be summed per activity rather than per session.
+    private func advanceSegment() {
+        guard !segmentsDone, segIndex < segments.count else { return }
+        bankCurrentSegmentTime()
+
+        let wasLast = segIndex + 1 >= segments.count
+        segIndex += 1
+        segStartElapsed = elapsed
+        segStartMeters = sessionMeters
+        lastNudge = elapsed          // don't nudge the instant a card starts
+
+        guard !wasLast else {
+            segmentsDone = true
+            announceCompletion()
+            pushLiveActivity()
+            return
+        }
+        startIntervalsIfNeeded()
+        if voiceOn { announceSegment(segments[segIndex]) }
+        pushLiveActivity()
+    }
+
+    private func bankCurrentSegmentTime() {
+        guard segIndex < segments.count else { return }
+        let key = segments[segIndex].activity.rawValue
+        activitySeconds[key, default: 0] += max(0, elapsedInSegment)
+    }
+
+    /// The last card just ended. A single distance/time card gets the goal-reached
+    /// quip it always had; anything structured gets "workout complete".
+    private func announceCompletion() {
+        guard voiceOn, !goalAnnounced else { return }
+        goalAnnounced = true
+        guard segments.count == 1, let only = segments.first else {
+            SpeechService.shared.speak(.workoutComplete)
+            return
+        }
+        switch only.goal {
+        case .distance:
+            SpeechService.shared.speak(.goalReached(.distance, target: only.endMeters, unit: unit,
+                                                    motivationIndex: Motivation.goalIndex()))
+        case .time:
+            SpeechService.shared.speak(.goalReached(.time, target: only.endSeconds, unit: unit,
+                                                    motivationIndex: Motivation.goalIndex()))
+        case .intervals:
+            break   // "Intervals complete" was just spoken; don't say it twice
+        default:
+            SpeechService.shared.speak(.workoutComplete)
+        }
+    }
+
+    // MARK: Cues
+
+    /// Shared over/under nudging. Silent without a target, while barely moving (so
+    /// a red light doesn't nag), and more often than every 25s.
+    private func nudgeTowardPace(_ target: Double) {
+        guard target > 0, displayedSpeedMps > 0.4, elapsed - lastNudge >= 25 else { return }
+        let ratio = (1.0 / displayedSpeedMps) / target   // >1 = slower than target
+        if ratio > 1.08 {
+            lastNudge = elapsed
+            if voiceOn { SpeechService.shared.speak(.pace(.faster)) }
+        } else if ratio < 0.92 {
+            lastNudge = elapsed
+            if voiceOn { SpeechService.shared.speak(.pace(.slower)) }
+        }
+    }
+
+    /// Same idea against a heart-rate zone. Silent with no live HR — which is the
+    /// normal case without a Watch, and not something to complain about mid-run.
+    private func nudgeTowardZone(_ index: Int) {
+        let bpm = liveHR.bpm
+        guard bpm > 0, elapsed - lastNudge >= 25,
+              let zone = zones.first(where: { $0.index == index }) else { return }
+        if bpm < zone.lower {
+            lastNudge = elapsed
+            if voiceOn { SpeechService.shared.speak(.pace(.faster)) }
+        } else if bpm > zone.upper {
+            lastNudge = elapsed
+            if voiceOn { SpeechService.shared.speak(.pace(.slower)) }
+        }
+    }
+
+    private func announceSegment(_ seg: ActivitySegment) {
+        guard voiceOn else { return }
+        var amount = seg.goal == .intervals ? "\(seg.reps) intervals" : ""
+        if let end = seg.endBasis {
+            if end == .distance {
+                amount = unit.spokenDistance(seg.endMeters)
+            } else {
+                let m = Int((seg.endSeconds / 60).rounded())
+                amount = m > 0 ? "\(m) minute\(m == 1 ? "" : "s")" : "\(Int(seg.endSeconds)) seconds"
+            }
+        }
+        let target: String?
+        switch seg.goal {
+        case .pace:
+            target = seg.paceTargetSecPerMeter > 0
+                ? unit.spokenPace(seconds: seg.paceTargetSecPerMeter * unitMeters, meters: unitMeters)
+                : nil
+        case .heartRate:
+            target = "zone \(seg.hrZone)"
+        default:
+            target = nil
+        }
+        SpeechService.shared.speak(.stepStart(activity: seg.activity,
+                                              label: seg.label.trimmingCharacters(in: .whitespaces),
+                                              amount: amount, target: target))
+    }
+
+    private func announceUnitMark(_ n: Int) {
+        guard voiceOn else { return }
+        SpeechService.shared.speak(.mark(unit: unit, type: liveActivity, index: n,
+                                         elapsed: elapsed, meters: sessionMeters))
+    }
+
     /// Live Activity detail line (right side of the island / lock screen).
     private func liveDetail() -> String {
         if pausedAt != nil { return "Paused" }
-        switch workoutType {
-        case .custom:
-            guard !stepsDone, stepIndex < steps.count else { return "Workout done" }
-            return "\(steps[stepIndex].kind.label) · \(stepIndex + 1)/\(steps.count)"
-        case .intervals:
-            return intervalsDone ? "Intervals done" : "\(intPhaseIsWork ? "WORK" : "REST") · \(intRep)/\(intReps)"
-        case .pace:
-            return "Target \(unit.paceString(secondsPerUnit: paceTargetSecPerMeter * unitMeters))"
-        case .distance:
-            return goalTarget > 0 ? "Goal \(unit.distanceString(goalTarget))" : ""
-        case .time:
-            return goalTarget > 0 ? "Goal \(timeString(goalTarget))" : ""
-        case .free:
-            return ""
+        guard let seg = currentSegment else { return "Workout done" }
+        if seg.goal == .intervals {
+            return "\(intPhaseIsWork ? "WORK" : "REST") · \(intRep)/\(seg.reps)"
+        }
+        let position = segments.count > 1 ? " · \(segIndex + 1)/\(segments.count)" : ""
+        switch seg.goal {
+        case .none:      return segments.count > 1 ? "Open\(position)" : ""
+        case .distance:  return "Goal \(unit.distanceString(seg.endMeters))\(position)"
+        case .time:      return "Goal \(timeString(seg.endSeconds))\(position)"
+        case .pace:      return "Target \(seg.paceText(unit))\(position)"
+        case .heartRate: return "Zone \(seg.hrZone)\(position)"
+        case .intervals: return ""
         }
     }
 
@@ -903,82 +1018,7 @@ struct ActivitySessionView: View {
                                           detail: liveDetail())
     }
 
-    private func tickPace() {
-        nudgeToward(paceTargetSecPerMeter)
-    }
-
-    /// Shared over/under-pace nudging. Silent without a target, while barely
-    /// moving (so a red light doesn't nag), and more often than every 25s.
-    private func nudgeToward(_ target: Double) {
-        guard target > 0, displayedSpeedMps > 0.4,
-              elapsed - lastPaceNudge >= 25 else { return }
-        let ratio = (1.0 / displayedSpeedMps) / target   // >1 = slower than target
-        if ratio > 1.08 {
-            lastPaceNudge = elapsed
-            if voiceOn { SpeechService.shared.speak(.pace(.faster)) }
-        } else if ratio < 0.92 {
-            lastPaceNudge = elapsed
-            if voiceOn { SpeechService.shared.speak(.pace(.slower)) }
-        }
-    }
-
-    /// Advances the custom step sequence. Each step ends on its own basis —
-    /// elapsed time or distance covered since the step began — and carries its
-    /// own optional pace target.
-    private func tickCustom() {
-        guard !stepsDone, stepIndex < steps.count else { return }
-        let step = steps[stepIndex]
-
-        let finished: Bool
-        switch step.basis {
-        case .time:     finished = elapsed - stepStartElapsed >= step.seconds
-        case .distance: finished = sessionMeters - stepStartMeters >= step.meters
-        }
-
-        if finished {
-            advanceStep()
-        } else {
-            nudgeToward(step.paceTargetSecPerMeter)
-        }
-    }
-
-    private func advanceStep() {
-        stepIndex += 1
-        stepStartElapsed = elapsed
-        stepStartMeters = sessionMeters
-        lastPaceNudge = elapsed          // don't nudge the instant a step starts
-
-        guard stepIndex < steps.count else {
-            stepsDone = true
-            if voiceOn { SpeechService.shared.speak(.workoutComplete) }
-            pushLiveActivity()
-            return
-        }
-        announceStep(steps[stepIndex])
-        pushLiveActivity()
-    }
-
-    private func announceStep(_ step: WorkoutStep) {
-        guard voiceOn else { return }
-        let amount: String
-        switch step.basis {
-        case .time:
-            let m = Int((step.seconds / 60).rounded())
-            amount = m > 0 ? "\(m) minute\(m == 1 ? "" : "s")" : "\(Int(step.seconds)) seconds"
-        case .distance:
-            amount = unit.spokenDistance(step.meters)
-        }
-        let target = step.hasPaceTarget
-            ? unit.spokenPace(seconds: step.paceTargetSecPerMeter * unitMeters, meters: unitMeters)
-            : nil
-        SpeechService.shared.speak(.stepStart(kind: step.kind, amount: amount, target: target))
-    }
-
-    private func announceUnitMark(_ n: Int) {
-        guard voiceOn, let type = session?.type else { return }
-        SpeechService.shared.speak(.mark(unit: unit, type: type, index: n,
-                                         elapsed: elapsed, meters: sessionMeters))
-    }
+    // MARK: - Pause / finish
 
     /// Pause/resume. GPS is suspended too, so standing still doesn't accrue
     /// drift-distance, and the route isn't bridged across the stop.
@@ -987,12 +1027,11 @@ struct ActivitySessionView: View {
             pausedTotal += Date().timeIntervalSince(since)
             pausedAt = nil
             if session?.usedGPS == true { location.resumeTracking() }
-            pushLiveActivity()
         } else {
             pausedAt = Date()
             if session?.usedGPS == true { location.pauseTracking() }
-            pushLiveActivity()
         }
+        pushLiveActivity()
     }
 
     private func finish() {
@@ -1002,9 +1041,21 @@ struct ActivitySessionView: View {
             pausedTotal += Date().timeIntervalSince(since)
             pausedAt = nil
         }
+        // The card in progress never "advanced", so bank its time here or it drops
+        // out of the calorie total entirely. Running on past the last card counts
+        // toward that card's activity — it's still the thing you were doing.
+        if segmentsDone {
+            if let last = segments.last {
+                activitySeconds[last.activity.rawValue, default: 0] += max(0, elapsed - segStartElapsed)
+            }
+        } else {
+            bankCurrentSegmentTime()
+        }
+
         ticker?.invalidate(); ticker = nil
         location.onPoint = nil
         location.stopTracking()
+        liveHR.stop()
         LiveActivityManager.shared.end()
 
         guard let s = session else { return }
@@ -1015,11 +1066,13 @@ struct ActivitySessionView: View {
         let paused = pausedTotal
         let gpsDistance = location.distanceMeters
         let hadGap = location.hadGap
+        let perActivity = activitySeconds
         session = nil
         startDate = nil
         pausedTotal = 0
         Task { await finalize(s, end: end, seconds: seconds, paused: paused,
-                              gpsDistance: gpsDistance, hadGap: hadGap) }
+                              gpsDistance: gpsDistance, hadGap: hadGap,
+                              perActivity: perActivity) }
     }
 
     /// Resolves the session's distance, choosing the best available source and
@@ -1031,7 +1084,8 @@ struct ActivitySessionView: View {
     /// - GPS off, walk/run → pedometer distance (the expected source, not a failure).
     @MainActor
     private func finalize(_ s: ActivitySession, end: Date, seconds: Double, paused: Double,
-                          gpsDistance: Double, hadGap: Bool) async {
+                          gpsDistance: Double, hadGap: Bool,
+                          perActivity: [String: TimeInterval]) async {
         s.endedAt = end
         s.activeSeconds = seconds
         s.pausedSeconds = paused
@@ -1065,7 +1119,7 @@ struct ActivitySessionView: View {
 
         s.distanceMeters = distance
         s.distanceEstimated = estimated
-        s.activeEnergyKcal = HealthCalc.kcal(type: s.type, minutes: seconds / 60)
+        s.activeEnergyKcal = kcal(perActivity: perActivity, fallbackSeconds: seconds, type: s.type)
         try? context.save()
 
         // Spoken recap + quip (releases the audio session when it finishes).
@@ -1088,6 +1142,19 @@ struct ActivitySessionView: View {
             observed: nil,
             age: SuiteProfileStore.load()?.age ?? 0)
         await HeartRateBackfill.fill(s, zones: HeartRateZones.zones(maxHR: maxHR, restingHR: resting))
+    }
+
+    /// Calories summed per card, so a run/walk workout isn't priced entirely at
+    /// one activity's MET value. Falls back to the session type when no per-card
+    /// time was banked.
+    private func kcal(perActivity: [String: TimeInterval], fallbackSeconds: Double,
+                      type: ActivityType) -> Double {
+        let banked = perActivity.reduce(into: 0.0) { total, entry in
+            guard let activity = ActivityType(rawValue: entry.key) else { return }
+            total += HealthCalc.kcal(type: activity, minutes: entry.value / 60)
+        }
+        guard banked > 0 else { return HealthCalc.kcal(type: type, minutes: fallbackSeconds / 60) }
+        return banked
     }
 
     private func timeString(_ t: TimeInterval) -> String {

@@ -150,19 +150,23 @@ enum SampleDataGenerator {
     // MARK: Scheduled runs
 
     private static func addUpcoming(into context: ModelContext, from today: Date, calendar cal: Calendar) {
-        let upcoming: [(Int, String, WorkoutType, Double, Int)] = [
-            (1, "Easy 5K",   .distance, 5000, 0),
-            (3, "Tempo 20",  .time,     0,    20),
-            (5, "Long Run",  .time,     0,    60),
+        let upcoming: [(Int, String, [ActivitySegment])] = [
+            (1, "Easy 5K", [ActivitySegment(activity: .run, goal: .distance,
+                                            basis: .distance, meters: 5000)]),
+            (3, "Tempo 20", [
+                ActivitySegment(activity: .run, goal: .time, label: "Warm-up",
+                                basis: .time, seconds: 600),
+                ActivitySegment(activity: .run, goal: .time, label: "Tempo",
+                                basis: .time, seconds: 1200),
+                ActivitySegment(activity: .walk, goal: .time, label: "Cool-down",
+                                basis: .time, seconds: 300),
+            ]),
+            (5, "Long Run", [ActivitySegment(activity: .run, goal: .time,
+                                             basis: .time, seconds: 3600)]),
         ]
-        for (offset, title, type, meters, minutes) in upcoming {
+        for (offset, title, segments) in upcoming {
             guard let d = cal.date(byAdding: .day, value: offset, to: today) else { continue }
-            var p = PendingWorkout(type: .run)
-            p.name = title
-            p.workoutType = type
-            p.meters = meters
-            p.minutes = minutes
-            context.insert(ScheduledRun(date: d, from: p))
+            context.insert(ScheduledRun(date: d, from: PendingWorkout(segments: segments, name: title)))
         }
     }
 }

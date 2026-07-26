@@ -30,9 +30,10 @@ final class ActivitySession {
     var intervalRest: Double = 0          // seconds
     var intervalReps: Int = 0
     var paceTargetSecPerMeter: Double = 0 // unit-agnostic target pace
-    /// Custom multi-segment workout (v0.29): the steps actually run, snapshotted
-    /// as JSON so history reflects the session even if the saved workout is
-    /// later edited or deleted.
+    /// The `ActivitySegment` cards actually run, snapshotted as JSON so history
+    /// reflects the session even if the saved workout is later edited or deleted.
+    /// Every session has these since v0.45 — a plain run is simply one card. The
+    /// attribute keeps its old name so existing stores need no schema change.
     var customStepsJSON: String = "[]"
     var customWorkoutName: String = ""
 
@@ -63,7 +64,7 @@ final class ActivitySession {
 
     var type: ActivityType { ActivityType(rawValue: typeRaw) ?? .walk }
     var workoutType: WorkoutType { WorkoutType(rawValue: workoutTypeRaw) ?? .free }
-    var customSteps: [WorkoutStep] { WorkoutStep.decode(customStepsJSON) }
+    var segments: [ActivitySegment] { ActivitySegment.decode(customStepsJSON) }
     var hrZoneSeconds: [Double] { HeartRateZones.decode(hrZoneSecondsJSON) }
     var hasHeartRate: Bool { avgHeartRateBpm > 0 }
     var sortedRoute: [RoutePoint] { route.sorted { $0.timestamp < $1.timestamp } }

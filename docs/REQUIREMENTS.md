@@ -108,6 +108,13 @@ in the roadmap below.
   but **shipped early** (v0.14–0.16): workout types free/distance/time/intervals/
   pace with per-mode voice coaching and the deadpan personality. Left here for
   history; see roadmap for what's next (personality packs, workout library).
+  **Superseded in v0.45**: the fixed run-type menu became a stack of
+  `ActivitySegment` **cards** (activity + goal + the goal's fields, `+` to add the
+  next), mirroring LiftKit's per-set cards. One card with no goal is a plain run;
+  several cards is a structured workout. The separate "Custom" type is gone —
+  the card stack *is* the custom mode. `WorkoutType` survives only as the
+  after-the-fact classification History, Stats and `AerobicAnalysis` sort by, and
+  is now derived rather than chosen.
 - **Apple Watch app + complications** → v2 (where cardio really belongs; on-wrist GPS + HR). Same stance as LiftKit.
 - **Planning calendar, training-plan generator, recovery-aware scheduling** → v2
   differentiation tentpoles (see §3.1 / `DIFFERENTIATION.md`).

@@ -28,7 +28,8 @@ struct SessionDetailView: View {
                 summaryTiles
                 secondaryStats
                 if session.hasHeartRate { heartRateCard }
-                if !session.customSteps.isEmpty { stepsCard }
+                // One card is just "a run" — the metrics above already say it.
+                if session.segments.count > 1 { stepsCard }
                 if !splits.isEmpty { splitsCard }
                 if let notes = session.notes, !notes.isEmpty { notesCard(notes) }
                 doAgainButton
@@ -215,25 +216,26 @@ struct SessionDetailView: View {
         .padding(.horizontal, RKSpacing.md)
     }
 
-    /// The custom workout as it was run — snapshotted on the session, so editing
-    /// or deleting the saved workout later can't rewrite history.
+    /// The workout as it was run — the cards snapshotted on the session, so
+    /// editing or deleting a saved template later can't rewrite history.
     private var stepsCard: some View {
         VStack(alignment: .leading, spacing: RKSpacing.sm) {
             Text(session.customWorkoutName.isEmpty ? "Workout" : session.customWorkoutName)
                 .font(RKFont.heading).foregroundColor(RKColor.textPrimary)
-            ForEach(Array(session.customSteps.enumerated()), id: \.element.id) { i, step in
+            ForEach(Array(session.segments.enumerated()), id: \.element.id) { i, seg in
                 HStack(spacing: RKSpacing.sm) {
                     Text("\(i + 1)")
                         .font(RKFont.caption).foregroundColor(RKColor.textMuted)
                         .frame(width: 16, alignment: .trailing)
-                    Image(systemName: step.kind.sfSymbol)
+                    Image(systemName: seg.goal.sfSymbol)
                         .font(RKFont.caption)
-                        .foregroundColor(step.kind == .work ? RKColor.accent : RKColor.textMuted)
-                    Text(step.kind.label)
+                        .foregroundColor(seg.goal == .none ? RKColor.textMuted : RKColor.accent)
+                    Text(seg.label.isEmpty ? seg.activity.rawValue : seg.label)
                         .font(RKFont.caption).foregroundColor(RKColor.textSecondary)
                     Spacer()
-                    Text(step.summary(unit))
+                    Text(seg.summary(unit))
                         .font(RKFont.caption).foregroundColor(RKColor.textPrimary)
+                        .lineLimit(1).minimumScaleFactor(0.7)
                 }
             }
         }
