@@ -225,6 +225,14 @@ Build: 2 min warm-up → 0.2 mi @ any pace → 2 min cool-down (short, so it's t
 
 ---
 
+## ⚠️ Before App Store submission
+
+- **Remove Settings ▸ Developer ▸ "Load 3 months of sample data"** and
+  `SampleDataGenerator.swift`. It is deliberately not behind `#if DEBUG` so it
+  works in TestFlight release builds, which means it would ship otherwise.
+
+---
+
 ## P. Known gaps (do NOT file these)
 
 Still open, scheduled in `ROADMAP.md`:

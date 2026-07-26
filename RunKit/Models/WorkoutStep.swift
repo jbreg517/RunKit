@@ -99,6 +99,7 @@ final class CustomWorkout {
     var name: String = ""
     var createdAt: Date = Date()
     var stepsJSON: String = "[]"
+    var isFavorite: Bool = false
 
     init(name: String, steps: [WorkoutStep]) {
         self.name = name

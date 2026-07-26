@@ -34,6 +34,7 @@ struct SettingsView: View {
                 streakSection
                 heartRateSection
                 dataSection
+                developerSection
                 aboutSection
             }
             .scrollContentBackground(.hidden)
@@ -182,6 +183,22 @@ struct SettingsView: View {
             HStack { Text("Preparing…"); Spacer(); ProgressView() }
         } else {
             Label("Export My Data", systemImage: "square.and.arrow.up")
+        }
+    }
+
+    /// ⚠️ Development only — REMOVE before App Store submission. Kept out of
+    /// `#if DEBUG` deliberately so it works in a TestFlight release build.
+    private var developerSection: some View {
+        Section {
+            Button {
+                SampleDataGenerator.generate(into: context)
+            } label: {
+                Label("Load 3 months of sample data", systemImage: "wand.and.stars")
+            }
+        } header: {
+            Text("Developer")
+        } footer: {
+            Text("Generates a fake intermediate-runner history (about 20–30 miles a week) with routes and heart rate, so the screens can be reviewed. Remove this section before release.")
         }
     }
 

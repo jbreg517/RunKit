@@ -51,7 +51,8 @@ struct ActivitySessionView: View {
     private var distanceUnavailable: Bool {
         needsDistance && !gpsEnabled && !selectedType.pedometerDistance
     }
-    @State private var selectedType: ActivityType = .walk
+    /// Defaults to Run — the app is run-first and the entry point is "Start run".
+    @State private var selectedType: ActivityType = .run
 
     // Run-type setup
     @State private var workoutType: WorkoutType = .free
@@ -185,14 +186,6 @@ struct ActivitySessionView: View {
 
     private var setup: some View {
         VStack(spacing: RKSpacing.lg) {
-            Picker("Type", selection: $selectedType) {
-                ForEach(ActivityType.allCases) { t in
-                    Label(t.rawValue, systemImage: t.sfSymbol).tag(t)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, RKSpacing.md)
-
             Toggle("Use GPS (route + distance)", isOn: $gpsEnabled)
                 .tint(RKColor.accent)
                 .padding(.horizontal, RKSpacing.md)
@@ -242,16 +235,19 @@ struct ActivitySessionView: View {
     private var workoutSetup: some View {
         VStack(alignment: .leading, spacing: RKSpacing.sm) {
             HStack {
-                Text("Run type").font(RKFont.heading).foregroundColor(RKColor.textPrimary)
+                Text("Activity Type").font(RKFont.heading).foregroundColor(RKColor.textPrimary)
                 Spacer()
-                // Explicit binding rather than `.onChange`: changing the type by
-                // hand drops the recipe label, but `apply(_:)` setting the type
-                // must not (onChange would fire after apply and wipe the name).
-                Picker("Run type", selection: Binding(
-                    get: { workoutType },
-                    set: { workoutType = $0; recipeName = nil }
+                // Walk and Ride sit alongside the run types in one menu. The
+                // explicit binding (rather than `.onChange`) matters because
+                // `apply(_:)` also sets the type, and onChange would fire after
+                // it and wipe the recipe name.
+                Picker("Activity Type", selection: Binding(
+                    get: { activityChoice },
+                    set: { setActivityChoice($0); recipeName = nil }
                 )) {
-                    ForEach(WorkoutType.allCases) { Label($0.label, systemImage: $0.sfSymbol).tag($0) }
+                    ForEach(ActivityChoice.allCases) { c in
+                        Label(c.label, systemImage: c.sfSymbol).tag(c)
+                    }
                 }
                 .pickerStyle(.menu)
                 .tint(RKColor.accent)
@@ -320,6 +316,63 @@ struct ActivitySessionView: View {
                 workoutType = .custom
                 recipeName = name.isEmpty ? nil : name
             }
+        }
+    }
+
+    /// Walk and Ride are whole activities; the rest are run structures. Flattening
+    /// them into one menu keeps the setup card to a single control.
+    enum ActivityChoice: Hashable, Identifiable, CaseIterable {
+        case walk, ride
+        case run(WorkoutType)
+
+        static var allCases: [ActivityChoice] {
+            [.walk, .ride] + WorkoutType.allCases.map { .run($0) }
+        }
+
+        var id: String {
+            switch self {
+            case .walk:       return "walk"
+            case .ride:       return "ride"
+            case let .run(t): return "run-\(t.rawValue)"
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .walk:          return "Walk"
+            case .ride:          return "Ride"
+            case let .run(t):    return t == .free ? "Run" : "Run · \(t.label)"
+            }
+        }
+
+        var sfSymbol: String {
+            switch self {
+            case .walk:       return ActivityType.walk.sfSymbol
+            case .ride:       return ActivityType.ride.sfSymbol
+            case let .run(t): return t == .free ? ActivityType.run.sfSymbol : t.sfSymbol
+            }
+        }
+    }
+
+    private var activityChoice: ActivityChoice {
+        switch selectedType {
+        case .walk: return .walk
+        case .ride: return .ride
+        case .run:  return .run(workoutType)
+        }
+    }
+
+    private func setActivityChoice(_ c: ActivityChoice) {
+        switch c {
+        case .walk:
+            selectedType = .walk
+            workoutType = .free
+        case .ride:
+            selectedType = .ride
+            workoutType = .free
+        case let .run(t):
+            selectedType = .run
+            workoutType = t
         }
     }
 

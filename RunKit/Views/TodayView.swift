@@ -7,6 +7,7 @@ struct TodayView: View {
     @AppStorage("dailyStepGoal") private var goal = 8000
     @AppStorage("unitSystem") private var unitRaw = UnitSystem.metric.rawValue
     @AppStorage("weeklyActiveTarget") private var weeklyTarget = 3
+    @AppStorage(FavoriteRecipes.key) private var favoriteRecipesRaw = ""
     private var unit: UnitSystem { UnitSystem(rawValue: unitRaw) ?? .metric }
     @State private var motion = MotionService.shared
 
@@ -40,11 +41,23 @@ struct TodayView: View {
 
     /// A rotating handful of prebuilt workouts, so the row isn't always identical.
     private var prebuiltPicks: [WorkoutRecipe] {
+        let favs = FavoriteRecipes.names(favoriteRecipesRaw)
+        let starred = WorkoutRecipe.all.filter { favs.contains($0.name) }
+        // Favourites lead; the rest rotate daily so the row isn't static.
         let day = Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0
-        let all = WorkoutRecipe.all
-        guard all.count > 6 else { return all }
-        let start = day % all.count
-        return (0..<6).map { all[(start + $0) % all.count] }
+        let rest = WorkoutRecipe.all.filter { !favs.contains($0.name) }
+        guard !rest.isEmpty else { return starred }
+        let start = day % rest.count
+        let rotated = (0..<min(6, rest.count)).map { rest[(start + $0) % rest.count] }
+        return starred + rotated
+    }
+
+    /// Favourited templates lead the list.
+    private var orderedTemplates: [CustomWorkout] {
+        templates.sorted { a, b in
+            if a.isFavorite != b.isFavorite { return a.isFavorite }
+            return a.createdAt > b.createdAt
+        }
     }
 
     private var streak: StreakCalculator.Result {
@@ -66,6 +79,7 @@ struct TodayView: View {
                         sheet = .day(day)
                     }
                     dueSection
+                    upcomingSection
                     templatesSection
                     prebuiltSection
                     streakCard
@@ -79,7 +93,7 @@ struct TodayView: View {
                 .padding(.vertical, RKSpacing.md)
                 .readableWidth()
             }
-            .navigationTitle("Today")
+            .navigationTitle("Run")
             .background(RKColor.background.ignoresSafeArea())
             .onAppear { motion.startToday() }
             .sheet(item: $sheet) { which in
@@ -159,6 +173,57 @@ struct TodayView: View {
         }
     }
 
+    /// Scheduled ahead of today. Without this a run booked for tomorrow shows
+    /// only as a calendar ring, which reads as "Schedule did nothing".
+    @ViewBuilder
+    private var upcomingSection: some View {
+        let upcoming = scheduled
+            .filter { !$0.isCompleted && $0.date > Calendar.current.startOfDay(for: Date()) }
+            .prefix(4)
+        if !upcoming.isEmpty {
+            VStack(alignment: .leading, spacing: RKSpacing.sm) {
+                sectionHeader("UPCOMING")
+                    .padding(.horizontal, RKSpacing.md)
+                ForEach(Array(upcoming)) { run in
+                    Button {
+                        router.startRun(PendingWorkout(scheduled: run))
+                    } label: {
+                        HStack(spacing: RKSpacing.md) {
+                            Image(systemName: run.type.sfSymbol)
+                                .foregroundColor(RKColor.textMuted)
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(run.title)
+                                    .font(RKFont.bodyBold)
+                                    .foregroundColor(RKColor.textPrimary)
+                                Text("\(dayLabel(run.date)) · \(run.summary(unit))")
+                                    .font(RKFont.caption)
+                                    .foregroundColor(RKColor.textMuted)
+                            }
+                            Spacer()
+                        }
+                        .padding(RKSpacing.md)
+                        .background(RKColor.surface)
+                        .cornerRadius(RKRadius.large)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, RKSpacing.md)
+                    .contextMenu {
+                        Button("Remove", role: .destructive) { context.delete(run) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func dayLabel(_ d: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInTomorrow(d) { return "Tomorrow" }
+        let f = DateFormatter()
+        f.dateFormat = cal.dateComponents([.day], from: Date(), to: d).day ?? 0 < 7 ? "EEEE" : "EEE d MMM"
+        return f.string(from: d)
+    }
+
     private func overdueLabel(_ run: ScheduledRun) -> String {
         let cal = Calendar.current
         guard !cal.isDateInToday(run.date) else { return "" }
@@ -183,13 +248,15 @@ struct TodayView: View {
             }
             .padding(.horizontal, RKSpacing.md)
 
+            buildCustomButton
+
             if templates.isEmpty {
                 Text("Build a workout once and it lives here — warm-up, work at a target pace, cool-down.")
                     .font(RKFont.caption)
                     .foregroundColor(RKColor.textMuted)
                     .padding(.horizontal, RKSpacing.md)
             } else {
-                ForEach(templates) { t in
+                ForEach(orderedTemplates) { t in
                     Button {
                         router.startRun(PendingWorkout(custom: t))
                     } label: {
@@ -206,6 +273,10 @@ struct TodayView: View {
                                     .foregroundColor(RKColor.textMuted)
                             }
                             Spacer()
+                            FavoriteStar(isOn: t.isFavorite) {
+                                t.isFavorite.toggle()
+                                try? context.save()
+                            }
                             Image(systemName: "play.circle.fill")
                                 .font(.title3)
                                 .foregroundColor(RKColor.accent)
@@ -218,32 +289,34 @@ struct TodayView: View {
                     .padding(.horizontal, RKSpacing.md)
                 }
             }
-
-            Button {
-                sheet = .builder
-            } label: {
-                HStack(spacing: RKSpacing.sm) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundColor(RKColor.accent)
-                    Text("New workout")
-                        .font(RKFont.bodyBold)
-                        .foregroundColor(RKColor.accent)
-                    Spacer()
-                }
-                .padding(RKSpacing.md)
-                .frame(maxWidth: .infinity)
-                .background(RKColor.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: RKRadius.large)
-                        .strokeBorder(RKColor.surfaceElevated, lineWidth: 1)
-                )
-                .cornerRadius(RKRadius.large)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, RKSpacing.md)
         }
+    }
+
+    private var buildCustomButton: some View {
+        Button {
+            sheet = .builder
+        } label: {
+            HStack(spacing: RKSpacing.sm) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundColor(RKColor.accent)
+                Text("Build Custom")
+                    .font(RKFont.bodyBold)
+                    .foregroundColor(RKColor.accent)
+                Spacer()
+            }
+            .padding(RKSpacing.md)
+            .frame(maxWidth: .infinity)
+            .background(RKColor.surface)
+            .overlay(
+                RoundedRectangle(cornerRadius: RKRadius.large)
+                    .strokeBorder(RKColor.surfaceElevated, lineWidth: 1)
+            )
+            .cornerRadius(RKRadius.large)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, RKSpacing.md)
     }
 
     private func templateSummary(_ t: CustomWorkout) -> String {
@@ -267,8 +340,14 @@ struct TodayView: View {
                             router.startRun(PendingWorkout(recipe: r))
                         } label: {
                             VStack(alignment: .leading, spacing: RKSpacing.xs) {
-                                Image(systemName: r.category.sfSymbol)
-                                    .foregroundColor(RKColor.accent)
+                                HStack {
+                                    Image(systemName: r.category.sfSymbol)
+                                        .foregroundColor(RKColor.accent)
+                                    Spacer()
+                                    FavoriteStar(isOn: FavoriteRecipes.contains(r.name, in: favoriteRecipesRaw)) {
+                                        favoriteRecipesRaw = FavoriteRecipes.toggle(r.name, in: favoriteRecipesRaw)
+                                    }
+                                }
                                 Text(r.name)
                                     .font(RKFont.bodyBold)
                                     .foregroundColor(RKColor.textPrimary)
@@ -359,8 +438,11 @@ struct TodayView: View {
 
     /// Step ring on the left, the three stat cards stacked on the right.
     private var todayRow: some View {
-        HStack(alignment: .top, spacing: RKSpacing.md) {
+        // No .top alignment and a stretched ring: the HStack sizes to the taller
+        // column and the ring card fills it, so both sides line up.
+        HStack(spacing: RKSpacing.md) {
             ringCard
+                .frame(maxHeight: .infinity)
             VStack(spacing: RKSpacing.sm) {
                 stat(String(format: "%.2f", unit.distance(motion.distanceMeters)),
                      unit.distanceUnit, "map")
@@ -368,6 +450,7 @@ struct TodayView: View {
                 stat("\(motion.flights)", "flights", "stairs")
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, RKSpacing.md)
     }
 
