@@ -258,18 +258,31 @@ struct TodayView: View {
 
     // MARK: Your workouts (saved templates)
 
+    /// Scheduling lives behind one always-visible control, following LiftKit's
+    /// "Schedule ▸ Manage Upcoming" menu. It sits on this header rather than on
+    /// UPCOMING because that section hides when nothing is scheduled — which is
+    /// also when a stale series most needs cancelling.
+    private var scheduleMenu: some View {
+        Menu {
+            Button { sheet = .schedule } label: {
+                Label("Schedule a Run", systemImage: "calendar.badge.plus")
+            }
+            Button { sheet = .upcoming } label: {
+                Label("Manage Upcoming", systemImage: "calendar.badge.clock")
+            }
+        } label: {
+            Label("Schedule", systemImage: "calendar")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(RKColor.accent)
+        }
+    }
+
     private var templatesSection: some View {
         VStack(alignment: .leading, spacing: RKSpacing.sm) {
             HStack {
                 sectionHeader("YOUR WORKOUTS")
                 Spacer()
-                Button {
-                    sheet = .schedule
-                } label: {
-                    Label("Schedule", systemImage: "calendar")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(RKColor.accent)
-                }
+                scheduleMenu
             }
             .padding(.horizontal, RKSpacing.md)
 
