@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import SwiftData
 
 struct SettingsView: View {
@@ -14,6 +15,7 @@ struct SettingsView: View {
     @AppStorage("weeklyActiveTarget") private var weeklyTarget = 3
     @AppStorage("maxHeartRate") private var maxHeartRate = 0.0
     @State private var showClear = false
+    @State private var health = StoreHealth.shared
 
     @Query private var sessions: [ActivitySession]
     @State private var exporting = false
@@ -34,6 +36,7 @@ struct SettingsView: View {
                 streakSection
                 heartRateSection
                 dataSection
+                storageSection
                 developerSection
                 aboutSection
             }
@@ -186,6 +189,49 @@ struct SettingsView: View {
         }
     }
 
+    /// Where the store actually is and whether it's actually saving.
+    ///
+    /// Exists because the shared-store bug was invisible from inside the app: the
+    /// container opened, saves succeeded, and rows disappeared afterwards when a
+    /// sibling app migrated the same file. Seeing the store path and the file sizes
+    /// next to each other is what identified it — so that readout stays shipped.
+    private var storageSection: some View {
+        Section {
+            LabeledContent("Saving") {
+                Text(health.isInMemory ? "No — temporary storage" : "Yes")
+                    .foregroundColor(health.isInMemory ? RKColor.danger : RKColor.success)
+            }
+            LabeledContent("Store", value: storeName)
+            if health.failedSaveCount > 0 {
+                LabeledContent("Failed saves") {
+                    Text("\(health.failedSaveCount)").foregroundColor(RKColor.danger)
+                }
+            }
+            if let note = health.recoveryNote {
+                Text(note).font(RKFont.caption).foregroundColor(RKColor.accent)
+            }
+            Button {
+                UIPasteboard.general.string = health.diagnosticReport
+            } label: {
+                Label("Copy diagnostics", systemImage: "doc.on.doc")
+            }
+        } header: {
+            Text("Storage")
+        } footer: {
+            Text(health.isInMemory
+                 ? "RunKit couldn’t open your saved history and is not saving anything. Copy the diagnostics and report this."
+                 : "RunKit keeps its own database file, separate from LiftKit and FuelKit. Diagnostics list the store path and file sizes — useful if history ever goes missing.")
+        }
+    }
+
+    /// Just the filename and its size; the full path goes in the diagnostics.
+    private var storeName: String {
+        guard let path = health.storePath else { return "—" }
+        let name = (path as NSString).lastPathComponent
+        let kb = health.storeBytes / 1024
+        return kb > 0 ? "\(name) · \(kb) KB" : name
+    }
+
     /// ⚠️ Development only — REMOVE before App Store submission. Kept out of
     /// `#if DEBUG` deliberately so it works in a TestFlight release build.
     private var developerSection: some View {
@@ -233,6 +279,6 @@ struct SettingsView: View {
     private func clearAll() {
         try? context.delete(model: ActivitySession.self)
         try? context.delete(model: RoutePoint.self)
-        try? context.save()
+        Persist.save(context)
     }
 }

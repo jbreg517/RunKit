@@ -516,7 +516,7 @@ struct StatsView: View {
 
     private func delete(_ offsets: IndexSet) {
         for i in offsets { context.delete(completed[i]) }
-        try? context.save()
+        Persist.save(context)
     }
 
     // MARK: Helpers

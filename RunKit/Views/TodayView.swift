@@ -313,7 +313,7 @@ struct TodayView: View {
                             Spacer()
                             FavoriteStar(isOn: t.isFavorite) {
                                 t.isFavorite.toggle()
-                                try? context.save()
+                                Persist.save(context)
                             }
                             Image(systemName: "play.circle.fill")
                                 .font(.title3)

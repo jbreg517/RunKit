@@ -180,6 +180,6 @@ struct WorkoutBuilderView: View {
     private func save() {
         context.insert(CustomWorkout(name: trimmedName.isEmpty ? "Untitled" : trimmedName,
                                      segments: segments))
-        try? context.save()
+        Persist.save(context)
     }
 }

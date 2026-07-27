@@ -366,7 +366,7 @@ struct ActivitySessionView: View {
         let name = templateName.trimmingCharacters(in: .whitespaces)
         workoutName = name
         context.insert(CustomWorkout(name: name.isEmpty ? "Untitled" : name, segments: segments))
-        try? context.save()
+        Persist.save(context)
     }
 
     // MARK: - Live
@@ -1120,7 +1120,7 @@ struct ActivitySessionView: View {
         s.distanceMeters = distance
         s.distanceEstimated = estimated
         s.activeEnergyKcal = kcal(perActivity: perActivity, fallbackSeconds: seconds, type: s.type)
-        try? context.save()
+        Persist.save(context)
 
         // Spoken recap + quip (releases the audio session when it finishes).
         if voiceOn {

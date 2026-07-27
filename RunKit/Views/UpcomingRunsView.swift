@@ -178,17 +178,17 @@ struct UpcomingRunsView: View {
 
     private func delete(_ run: ScheduledRun) {
         context.delete(run)
-        try? context.save()
+        Persist.save(context)
     }
 
     private func cancelSeries(_ group: SeriesGroup) {
         for run in group.runs { context.delete(run) }
-        try? context.save()
+        Persist.save(context)
     }
 
     private func clearAll() {
         for run in upcoming { context.delete(run) }
-        try? context.save()
+        Persist.save(context)
     }
 
     // MARK: Formatting

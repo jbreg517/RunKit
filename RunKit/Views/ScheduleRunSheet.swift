@@ -264,7 +264,7 @@ struct ScheduleRunSheet: View {
         }
         // Explicit save: without it the inserts may not be visible to other views'
         // @Query before the sheet dismisses.
-        try? context.save()
+        Persist.save(context)
         dismiss()
     }
 

@@ -81,7 +81,7 @@ enum SampleDataGenerator {
         }
 
         addUpcoming(into: context, from: today, calendar: cal)
-        try? context.save()
+        Persist.save(context)
     }
 
     // MARK: Heart rate

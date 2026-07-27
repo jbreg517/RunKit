@@ -84,12 +84,12 @@ struct SessionDetailView: View {
             session.distanceEstimated = false   // user-entered is authoritative
         }
         session.activeEnergyKcal = HealthCalc.kcal(type: type, minutes: session.activeSeconds / 60)
-        try? context.save()
+        Persist.save(context)
     }
 
     private func deleteSession() {
         context.delete(session)
-        try? context.save()
+        Persist.save(context)
         dismiss()
     }
 

@@ -15,9 +15,14 @@
 		<dict>
 			<key>NSPrivacyAccessedAPIType</key>
 			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<!-- CA92.1 covers RunKit's own defaults. 1C8F.1 is additionally
+			     required because SuiteProfileStore uses UserDefaults(suiteName:)
+			     on the App Group shared with LiftKit and FuelKit. An incomplete
+			     manifest draws an ITMS warning on upload and can block the build. -->
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>CA92.1</string>
+				<string>1C8F.1</string>
 			</array>
 		</dict>
 	</array>

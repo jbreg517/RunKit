@@ -51,7 +51,7 @@ enum HeartRateBackfill {
         for s in pending {
             await fill(s, zones: zones)
         }
-        try? context.save()
+        Persist.save(context)
         return true
     }
 }
