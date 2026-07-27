@@ -265,6 +265,8 @@ struct ScheduleRunSheet: View {
         // Explicit save: without it the inserts may not be visible to other views'
         // @Query before the sheet dismisses.
         Persist.save(context)
+        // New plans are exactly what the other apps want early warning of.
+        SuiteActivityPublisher.publish(from: context)
         dismiss()
     }
 

@@ -31,6 +31,36 @@ struct SuiteProfile: Codable, Equatable {
 
     /// When this was last written, so a reader can tell who is newest.
     var updatedAt: Date = .distantPast
+
+    init() {}
+
+    /// Hand-written so **every field is optional on the wire**.
+    ///
+    /// This matters because the suite apps ship independently and some may not be
+    /// installed at all. Swift's synthesized `init(from:)` calls `decode(_:forKey:)`
+    /// for non-optional properties, which **throws when a key is absent** — property
+    /// default values are not consulted. So the first app to add a field here would
+    /// make every not-yet-updated app's decode throw, and since callers use `try?`,
+    /// they'd silently treat the shared profile as missing and quietly stop honouring
+    /// the user's goal.
+    ///
+    /// `decodeIfPresent` with a default makes the format both forward and backward
+    /// compatible: old readers ignore new fields, new readers fill in defaults for
+    /// fields old writers never wrote. **Add fields only, never rename or remove.**
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        heightInches   = try c.decodeIfPresent(Double.self, forKey: .heightInches) ?? 0
+        age            = try c.decodeIfPresent(Int.self, forKey: .age) ?? 0
+        biologicalSex  = try c.decodeIfPresent(String.self, forKey: .biologicalSex) ?? "unspecified"
+        latestWeightLb = try c.decodeIfPresent(Double.self, forKey: .latestWeightLb) ?? 0
+        goalType       = try c.decodeIfPresent(String.self, forKey: .goalType) ?? "maintain"
+        goalWeightLb   = try c.decodeIfPresent(Double.self, forKey: .goalWeightLb) ?? 0
+        weeklyRateLb   = try c.decodeIfPresent(Double.self, forKey: .weeklyRateLb) ?? 1.0
+        activityLevel  = try c.decodeIfPresent(String.self, forKey: .activityLevel) ?? "moderate"
+        proteinPerLb   = try c.decodeIfPresent(Double.self, forKey: .proteinPerLb) ?? 0.8
+        fatPercent     = try c.decodeIfPresent(Double.self, forKey: .fatPercent) ?? 0.30
+        updatedAt      = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
+    }
 }
 
 /// Reads/writes the one `SuiteProfile` in the shared App Group. Every suite app

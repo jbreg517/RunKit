@@ -96,7 +96,12 @@ struct TodayView: View {
             }
             .navigationTitle("Run")
             .background(RKColor.background.ignoresSafeArea())
-            .onAppear { motion.startToday() }
+            .onAppear {
+                motion.startToday()
+                // Republish on every foreground so the suite feed reflects runs
+                // recorded, scheduled or cancelled since the last visit.
+                SuiteActivityPublisher.publish(from: context)
+            }
             .sheet(item: $sheet) { which in
                 switch which {
                 case .builder:

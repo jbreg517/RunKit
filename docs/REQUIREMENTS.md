@@ -122,6 +122,33 @@ in the roadmap below.
 
 ---
 
+## 4.6 Suite data exchange
+
+No shared database — three apps migrating one SwiftData file is what caused the
+v0.48 data-loss bug. Three channels instead, by what kind of data it is:
+
+| Channel | Carries |
+|---|---|
+| **HealthKit** | Workouts, active energy, bodyweight — native types, source of truth. Never duplicated elsewhere. |
+| **`SuiteProfileStore`** | Goal, weekly rate, activity level, macro targets. Not HealthKit concepts. |
+| **`SuiteActivityStore`** | Derived training load and planned sessions (v0.49). |
+
+`SuiteActivity.swift` and `SuiteProfile.swift` are **byte-identical across all three
+apps** — `Codable` uses property names as JSON keys — so changes to either must be
+copied verbatim, and fields may only be *added*, never renamed or removed.
+
+RunKit publishes `suiteActivityFeed.runkit` and reads no other app's key:
+
+- **Load** — Edwards' TRIMP (minutes per zone × zone number) when a Watch recorded
+  heart rate, else duration × a per-activity weight. Normalised 0–1 against the
+  runner's own 90-day 90th-percentile day, so "hard" means hard *for them*.
+- **Plans** — upcoming `ScheduledRun`s, with distance cards converted to minutes at
+  the runner's own recent pace.
+- Days with no session are **omitted, not published as rest**. RunKit can't know a
+  day was a rest day; the user may have lifted. Absent ≠ zero.
+
+---
+
 ## 5. Privacy & permissions
 
 | Permission | When requested | Info.plist key |

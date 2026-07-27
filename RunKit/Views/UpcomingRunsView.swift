@@ -178,17 +178,24 @@ struct UpcomingRunsView: View {
 
     private func delete(_ run: ScheduledRun) {
         context.delete(run)
-        Persist.save(context)
+        save()
     }
 
     private func cancelSeries(_ group: SeriesGroup) {
         for run in group.runs { context.delete(run) }
-        Persist.save(context)
+        save()
     }
 
     private func clearAll() {
         for run in upcoming { context.delete(run) }
+        save()
+    }
+
+    /// Cancelling changes what the suite expects the user to do, so republish —
+    /// otherwise FuelKit keeps raising carbs for a long run that was called off.
+    private func save() {
         Persist.save(context)
+        SuiteActivityPublisher.publish(from: context)
     }
 
     // MARK: Formatting

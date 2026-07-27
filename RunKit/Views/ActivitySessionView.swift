@@ -1122,6 +1122,10 @@ struct ActivitySessionView: View {
         s.activeEnergyKcal = kcal(perActivity: perActivity, fallbackSeconds: seconds, type: s.type)
         Persist.save(context)
 
+        // Republish the suite feed while today's load is fresh, so FuelKit sees a
+        // hard session before the user opens it rather than after.
+        SuiteActivityPublisher.publish(from: context)
+
         // Spoken recap + quip (releases the audio session when it finishes).
         if voiceOn {
             SpeechService.shared.speakFinal(.finish(type: s.type, unit: unit, meters: s.distanceMeters,
