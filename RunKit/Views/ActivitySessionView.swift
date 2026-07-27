@@ -710,8 +710,7 @@ struct ActivitySessionView: View {
         announceStart()
         LiveActivityManager.shared.start(label: sessionActivity.rawValue,
                                          startDate: startDate ?? Date(),
-                                         distanceText: unit.distanceString(sessionMeters),
-                                         detail: liveDetail())
+                                         state: liveState())
 
         let t = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in tick() }
         ticker = t
@@ -1013,9 +1012,23 @@ struct ActivitySessionView: View {
         }
     }
 
+    /// Everything the Live Activity shows, built in one place so the lock screen
+    /// and the in-app metrics can't drift apart — they read the same properties.
+    ///
+    /// Pace is blanked while paused: the clock is frozen, so a live pace ticking
+    /// on beside it would be claiming movement that isn't happening.
+    private func liveState() -> RunActivityAttributes.ContentState {
+        let paused = pausedAt != nil
+        return RunActivityAttributes.ContentState(
+            distanceText: unit.distanceString(sessionMeters),
+            paceText: paused ? "--" : currentPaceString,
+            avgPaceText: overallPaceString,
+            paceLabel: liveActivity == .ride ? "speed" : "pace",
+            detailText: liveDetail())
+    }
+
     private func pushLiveActivity() {
-        LiveActivityManager.shared.update(distanceText: unit.distanceString(sessionMeters),
-                                          detail: liveDetail())
+        LiveActivityManager.shared.update(liveState())
     }
 
     // MARK: - Pause / finish
