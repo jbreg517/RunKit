@@ -1,8 +1,21 @@
 import SwiftUI
 import SwiftData
 
-/// Bumped +0.01 per push (shared convention with LiftKit). CI derives the build
-/// number from the git commit count.
+/// The marketing version — shown in Settings, and used for
+/// `CFBundleShortVersionString`.
+///
+/// **Bump this only for a release you want testers or the App Store to see as a new
+/// version.** Not on every commit. CI already derives the build number from the git
+/// commit count, so every push gets a unique, strictly increasing build without
+/// touching this line.
+///
+/// The old convention was +0.01 per push, which produced one marketing version per
+/// commit. That made the TestFlight build list unreadable, and for an external tester
+/// group it forces a fresh Beta App Review on every single push — Apple requires
+/// review per version, not per build. Build numbers are the right thing to iterate
+/// per commit; versions are for releases.
+///
+/// Shared convention across FuelKit, LiftKit and RunKit.
 enum AppVersion {
     static let current = "0.50"
 }

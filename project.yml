@@ -7,7 +7,7 @@ options:
 
 settings:
   base:
-    MARKETING_VERSION: "0.16"
+    MARKETING_VERSION: "0.50"
     CURRENT_PROJECT_VERSION: "1"
     # No DEVELOPMENT_TEAM here on purpose: an empty string is still a value and
     # overrides what `xcode-project use-profiles` writes per target during the
