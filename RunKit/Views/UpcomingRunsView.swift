@@ -196,6 +196,8 @@ struct UpcomingRunsView: View {
     private func save() {
         Persist.save(context)
         SuiteActivityPublisher.publish(from: context)
+        // Same reason for the watch: a cancelled run must stop being suggested.
+        WatchBridge.shared.publish(from: context, unit: unit)
     }
 
     // MARK: Formatting

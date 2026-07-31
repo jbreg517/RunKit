@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: com.ferrixguild
   deploymentTarget:
     iOS: "17.0"
+    watchOS: "10.0"
   createIntermediateGroups: true
 
 settings:
@@ -23,6 +24,15 @@ targets:
       - path: RunKit
     dependencies:
       - target: RunKitWidgets
+      # A watchOS app is embedded in the iOS app bundle under Watch/ — it is not a
+      # separate App Store product and not a separate TestFlight build. `copy` is
+      # required: without the explicit subpath XcodeGen embeds it like a framework
+      # and the archive fails validation.
+      - target: RunKitWatch
+        embed: true
+        copy:
+          destination: productsDirectory
+          subpath: "$(CONTENTS_FOLDER_PATH)/Watch"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ferrixguild.runkit
@@ -46,6 +56,33 @@ targets:
         INFOPLIST_FILE: RunKitWidgets/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_STYLE: Automatic
+
+  # The watch app records its own runs, so it links the real card model rather than
+  # a parallel copy. Those files are listed one by one instead of globbing a folder:
+  # most of RunKit/ imports UIKit or SwiftData and will not compile for watchOS, so
+  # membership has to be a deliberate, reviewable list.
+  RunKitWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: RunKitWatch
+      - path: RunKit/Shared/WatchMenu.swift          # wire format, shared with the app
+      - path: RunKit/Models/ActivitySegment.swift    # the card model itself
+      - path: RunKit/Enums/ActivityType.swift
+      - path: RunKit/Enums/WorkoutType.swift
+      - path: RunKit/Enums/WorkoutRecipe.swift
+      - path: RunKit/Services/UnitSystem.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ferrixguild.runkit.watchkitapp
+        INFOPLIST_FILE: RunKitWatch/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic
+        # Overrides the "1,2" in settings.base. Inheriting it silently produces a
+        # watch app that will not install.
+        TARGETED_DEVICE_FAMILY: "4"
 
 schemes:
   RunKit:

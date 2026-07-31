@@ -1,8 +1,12 @@
 import Foundation
-import SwiftData
 
 /// One card in the activity builder: an activity, an optional goal, and whatever
 /// decides when the card is over.
+///
+/// **Pure Foundation on purpose.** This file is a member of the watch target too,
+/// so the wrist runs the exact same card semantics as the phone rather than a
+/// parallel model that could drift. `CustomWorkout` — the SwiftData `@Model` that
+/// stores these — lives in its own file for that reason.
 ///
 /// Every session is now a list of these. A plain run is one segment with no goal;
 /// a structured workout is several — "10 min warm-up walk", "5 mi @ 8:00",
@@ -320,39 +324,5 @@ extension ActivitySegment {
         case .heartRate: return .heartRate
         case .intervals: return .intervals
         }
-    }
-}
-
-// MARK: - Saved templates
-
-/// A reusable workout. Cards are stored as JSON rather than a SwiftData
-/// relationship: to-many relationships have no guaranteed order, and for a
-/// structured workout the **order is the workout**. A plain `String` attribute
-/// also keeps the model trivially CloudKit-compatible.
-@Model
-final class CustomWorkout {
-    var id: UUID = UUID()
-    var name: String = ""
-    var createdAt: Date = Date()
-    /// Legacy attribute name, kept so existing stores migrate without a schema
-    /// change — the contents are `ActivitySegment`s.
-    var stepsJSON: String = "[]"
-    var isFavorite: Bool = false
-
-    init(name: String, segments: [ActivitySegment]) {
-        self.name = name
-        self.segments = segments
-    }
-
-    var segments: [ActivitySegment] {
-        get { ActivitySegment.decode(stepsJSON) }
-        set { stepsJSON = ActivitySegment.encode(newValue) }
-    }
-
-    /// Total distance in metres, or nil when any card is time-based.
-    var totalMeters: Double? {
-        let s = segments
-        guard !s.isEmpty, s.allSatisfy({ $0.endsOnDistance }) else { return nil }
-        return s.reduce(0) { $0 + $1.meters }
     }
 }

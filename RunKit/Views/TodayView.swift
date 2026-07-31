@@ -101,6 +101,7 @@ struct TodayView: View {
                 // Republish on every foreground so the suite feed reflects runs
                 // recorded, scheduled or cancelled since the last visit.
                 SuiteActivityPublisher.publish(from: context)
+                WatchBridge.shared.publish(from: context, unit: unit)
             }
             .sheet(item: $sheet) { which in
                 switch which {
@@ -110,6 +111,11 @@ struct TodayView: View {
                     WorkoutBuilderView(unit: unit, primaryTitle: "Save", offersSave: false) { built, name in
                         context.insert(CustomWorkout(name: name.isEmpty ? "Untitled" : name,
                                                      segments: built))
+                        // Publish here rather than relying on the next foreground:
+                        // `onAppear` does not fire again when a sheet is dismissed,
+                        // so a workout saved now wouldn't reach the watch until the
+                        // app was backgrounded and reopened.
+                        WatchBridge.shared.publish(from: context, unit: unit)
                     }
                 case .schedule:
                     ScheduleRunSheet(unit: unit)

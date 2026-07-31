@@ -41,9 +41,13 @@ workflows:
           # Mirror version/build into the Info.plist too.
           BUILD=$(git rev-list --count HEAD)
           VERSION=$(grep -oE 'static let current = "[0-9.]+"' RunKit/App/RunKitApp.swift | grep -oE '[0-9]+\.[0-9]+' | head -1)
-          PLIST="RunKit/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$PLIST" 2>/dev/null || true
-          [ -n "$VERSION" ] && /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST" 2>/dev/null || true
+          # Every embedded bundle must carry the SAME version as the host app —
+          # a mismatch on the watch app is a hard App Store validation rejection.
+          for PLIST in RunKit/Info.plist RunKitWidgets/Info.plist RunKitWatch/Info.plist; do
+            [ -f "$PLIST" ] || continue
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$PLIST" 2>/dev/null || true
+            [ -n "$VERSION" ] && /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST" 2>/dev/null || true
+          done
 
       - name: Build unsigned archive
         script: |
@@ -75,6 +79,12 @@ workflows:
           [ -z "$APP_PATH" ] && { echo "ERROR: No .app bundle found"; exit 1; }
           mkdir -p "$CM_BUILD_DIR/Payload"
           cp -r "$APP_PATH" "$CM_BUILD_DIR/Payload/"
+          # Drop the embedded watch app from the sideload IPA. AltStore re-signs
+          # with a free/dev profile that can't cover the watch app's own App ID, so
+          # leaving it in tends to fail the install outright — and a watch app can
+          # only really be tested through TestFlight anyway. The archive step above
+          # still COMPILES the watch target, which is the signal we want here.
+          rm -rf "$CM_BUILD_DIR/Payload/$(basename "$APP_PATH")/Watch"
           BUILD=$(git rev-list --count HEAD)
           VERSION=$(grep -oE 'static let current = "[0-9.]+"' RunKit/App/RunKitApp.swift | grep -oE '[0-9]+\.[0-9]+' | head -1)
           [ -z "$VERSION" ] && VERSION="0.00"
@@ -99,9 +109,13 @@ workflows:
   # Signed App Store / TestFlight build. Mirrors LiftKit's proven workflow.
   #
   # ONE-TIME SETUP IN THE CODEMAGIC UI (cannot be done from this file):
-  #   1. Apple Developer Program enrollment, then register BOTH App IDs at
-  #      developer.apple.com: `com.ferrixguild.runkit` and `com.ferrixguild.runkit.widgets`.
-  #      On the app's App ID enable HealthKit. (Live Activities need no App ID
+  #   1. Apple Developer Program enrollment, then register ALL THREE App IDs at
+  #      developer.apple.com: `com.ferrixguild.runkit`, `com.ferrixguild.runkit.widgets`
+  #      and `com.ferrixguild.runkit.watchkitapp`.
+  #      On the app's App ID enable HealthKit. On the WATCH App ID enable HealthKit
+  #      too — the watch records its own runs, so it needs the entitlement in its
+  #      own right; inheriting the phone's does not happen.
+  #      (Live Activities need no App ID
   #      toggle — they're driven by NSSupportsLiveActivities in Info.plist,
   #      already set. Only add Push Notifications if we later want the Live
   #      Activity updated by remote push; RunKit updates it locally, so skip.)
@@ -148,8 +162,10 @@ workflows:
           /usr/bin/sed -i '' "s/MARKETING_VERSION: \"[0-9.]*\"/MARKETING_VERSION: \"$VERSION\"/" project.yml
           /usr/bin/sed -i '' "s/CURRENT_PROJECT_VERSION: \"[0-9]*\"/CURRENT_PROJECT_VERSION: \"$BUILD\"/" project.yml
           xcodegen generate
-          # Mirror version/build into both Info.plists (app + widget must match).
-          for PLIST in RunKit/Info.plist RunKitWidgets/Info.plist; do
+          # Mirror version/build into every Info.plist — the app, the widget and
+          # the watch app must all report the same version or the upload is
+          # rejected at validation.
+          for PLIST in RunKit/Info.plist RunKitWidgets/Info.plist RunKitWatch/Info.plist; do
             [ -f "$PLIST" ] || continue
             /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$PLIST" 2>/dev/null || true
             [ -n "$VERSION" ] && /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST" 2>/dev/null || true
@@ -174,6 +190,14 @@ workflows:
             --create
           app-store-connect fetch-signing-files "com.ferrixguild.runkit.widgets" \
             --type IOS_APP_STORE \
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
+            --create
+          # The watch app is its own App ID and needs its own profile — but a
+          # watchOS one, not an iOS one. WATCH_APP_STORE is a distinct profile type
+          # and IOS_APP_STORE will be silently accepted here and then fail at
+          # archive time with an opaque signing error.
+          app-store-connect fetch-signing-files "com.ferrixguild.runkit.watchkitapp" \
+            --type WATCH_APP_STORE \
             --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
             --create
           keychain add-certificates

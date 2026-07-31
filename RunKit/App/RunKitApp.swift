@@ -17,7 +17,7 @@ import SwiftData
 ///
 /// Shared convention across FuelKit, LiftKit and RunKit.
 enum AppVersion {
-    static let current = "0.50"
+    static let current = "0.51"
 }
 
 @main
@@ -27,6 +27,10 @@ struct RunKitApp: App {
 
     init() {
         store = Self.makeStore()
+        // Activated at launch rather than on first use: a watch that woke while the
+        // phone app was closed has a queued application context waiting, and the
+        // session has to be live for the system to hand it over.
+        WatchBridge.shared.activate()
     }
 
     private var preferredScheme: ColorScheme? {

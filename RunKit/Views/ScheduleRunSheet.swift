@@ -267,6 +267,9 @@ struct ScheduleRunSheet: View {
         Persist.save(context)
         // New plans are exactly what the other apps want early warning of.
         SuiteActivityPublisher.publish(from: context)
+        // And the watch, so a run planned tonight is the suggestion on the wrist
+        // tomorrow morning without opening the phone first.
+        WatchBridge.shared.publish(from: context, unit: unit)
         dismiss()
     }
 

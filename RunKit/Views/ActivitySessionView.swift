@@ -1139,6 +1139,10 @@ struct ActivitySessionView: View {
         // hard session before the user opens it rather than after.
         SuiteActivityPublisher.publish(from: context)
 
+        // A finished run may have ticked off today's scheduled workout — the watch
+        // should stop offering it.
+        WatchBridge.shared.publish(from: context, unit: unit)
+
         // Spoken recap + quip (releases the audio session when it finishes).
         if voiceOn {
             SpeechService.shared.speakFinal(.finish(type: s.type, unit: unit, meters: s.distanceMeters,
