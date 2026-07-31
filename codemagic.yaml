@@ -192,12 +192,17 @@ workflows:
             --type IOS_APP_STORE \
             --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
             --create
-          # The watch app is its own App ID and needs its own profile — but a
-          # watchOS one, not an iOS one. WATCH_APP_STORE is a distinct profile type
-          # and IOS_APP_STORE will be silently accepted here and then fail at
-          # archive time with an opaque signing error.
+          # The watch app is its own App ID and needs its own profile, but the type
+          # is IOS_APP_STORE — App Store Connect registers watchOS bundle IDs under
+          # platform IOS, and there is no WATCH_APP_STORE profile type (the
+          # platform-specific variants are MAC_* and TVOS_* only).
+          #
+          # This call is belt-and-braces: `fetch-signing-files` matches the bundle
+          # ID as a PREFIX unless given --strict-match-identifier, so the first call
+          # above already picks up .widgets and .watchkitapp too. Keeping it
+          # explicit means a future rename can't silently drop the watch profile.
           app-store-connect fetch-signing-files "com.ferrixguild.runkit.watchkitapp" \
-            --type WATCH_APP_STORE \
+            --type IOS_APP_STORE \
             --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
             --create
           keychain add-certificates

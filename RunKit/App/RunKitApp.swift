@@ -17,7 +17,7 @@ import SwiftData
 ///
 /// Shared convention across FuelKit, LiftKit and RunKit.
 enum AppVersion {
-    static let current = "0.51"
+    static let current = "0.52"
 }
 
 @main

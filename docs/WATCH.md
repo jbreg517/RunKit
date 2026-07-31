@@ -102,8 +102,11 @@ Traps, all of them load-bearing:
   validation.
 - `WKApplication` = YES plus `WKCompanionAppBundleIdentifier` in the watch
   `Info.plist`. The old two-target `WKWatchKitApp` layout is gone as of watchOS 9.
-- The signed workflow fetches `WATCH_APP_STORE`, not `IOS_APP_STORE`. The wrong type
-  is accepted at fetch time and then fails at archive with an opaque signing error.
+- The watch profile type is `IOS_APP_STORE`. App Store Connect registers watchOS
+  bundle IDs under platform `IOS`, and there is **no** `WATCH_APP_STORE` type — the
+  platform-specific variants are `MAC_*` and `TVOS_*` only. `fetch-signing-files`
+  also prefix-matches the bundle ID unless given `--strict-match-identifier`, so the
+  call for `com.ferrixguild.runkit` already picks up both extensions.
 - Every embedded bundle must report the **same version** as the host app, so
   `RunKitWatch/Info.plist` is in the PlistBuddy mirroring loop in both workflows. A
   mismatch is a hard App Store validation rejection.
@@ -126,5 +129,6 @@ to a paired watch automatically.
 | | |
 |---|---|
 | v0.51 | Target, theme, menu, phone→watch sync. Start is inert — this build exists to prove the target compiles, signs and installs before ~1000 lines of HealthKit go into it. |
-| v0.52 | `HKWorkoutSession` + `HKLiveWorkoutBuilder`, watch GPS, the card engine on-wrist, haptic card transitions, session transfer back to the phone. |
+| v0.52 | Signing fix: watch profiles are `IOS_APP_STORE`. |
+| next | `HKWorkoutSession` + `HKLiveWorkoutBuilder`, watch GPS, the card engine on-wrist, haptic card transitions, session transfer back to the phone. |
 | later | The two-owner rule. Complications. Voice cues — the roadmap's open question is clip pack (bundle size, twice) vs system TTS; haptics carry v1 either way. |
