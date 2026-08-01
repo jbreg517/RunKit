@@ -130,5 +130,31 @@ to a paired watch automatically.
 |---|---|
 | v0.51 | Target, theme, menu, phone→watch sync. Start is inert — this build exists to prove the target compiles, signs and installs before ~1000 lines of HealthKit go into it. |
 | v0.52 | Signing fix: watch profiles are `IOS_APP_STORE`. |
-| next | `HKWorkoutSession` + `HKLiveWorkoutBuilder`, watch GPS, the card engine on-wrist, haptic card transitions, session transfer back to the phone. |
+| v0.53 | Recording. `HKWorkoutSession` + `HKLiveWorkoutBuilder`, live HR, watch GPS for the route, the full card engine on-wrist, haptic cues, run transferred back to the phone. |
+
+### Recording notes
+
+**Distance comes from HealthKit, not from summing `CLLocation`.** The watch fuses
+GPS with wrist motion far better than a raw coordinate sum, and it's the only source
+of real-time heart rate. Location is still collected, but *only* to draw the route.
+
+**HR zone bounds are resolved on the phone** and shipped in the menu payload — that's
+the side holding the max-HR override, the age from the suite profile, and a resting
+HR from Health. The watch derives the five bounds from `maxHR`/`restingHR` so a
+heart-rate card is judged against the same numbers on both devices.
+
+**Zone seconds are accumulated at 1 Hz while unpaused**, which sidesteps the
+gap-attribution problem `HeartRateZones.summarize` has to solve when the phone
+re-reads irregular samples after the fact. Average BPM accumulates *separately* from
+the zone buckets, so a phone that never synced a max HR costs the zone breakdown but
+not the heart rate itself.
+
+**The phone must never re-save an imported run to HealthKit.** The watch already
+wrote it, with its route. Saving again duplicates the workout and doubles the active
+energy, which then flows into FuelKit as real intake headroom. `hrCheckedAt` is
+stamped on import for the same reason — it's what stops `HeartRateBackfill`
+overwriting a wrist-measured summary with a worse re-query.
+
+**Transfers are idempotent on `WatchSessionPayload.id`.** WatchConnectivity can
+deliver a queued file more than once; without the id check the same run lands twice.
 | later | The two-owner rule. Complications. Voice cues — the roadmap's open question is clip pack (bundle size, twice) vs system TTS; haptics carry v1 either way. |

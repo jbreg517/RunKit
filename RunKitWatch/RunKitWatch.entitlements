@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.healthkit</key>
+	<true/>
+	<key>com.apple.developer.healthkit.access</key>
+	<array/>
+	<!-- Deliberately NOT in the suite App Group. The watch records to HealthKit and
+	     ships its runs to the phone by file transfer; it has no SwiftData store of
+	     its own, so a group container would be an entitlement with nothing behind
+	     it — and App Groups don't cross devices anyway. -->
+</dict>
+</plist>

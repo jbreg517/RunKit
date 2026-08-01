@@ -31,6 +31,7 @@ struct RunKitApp: App {
         // Activated at launch rather than on first use: a watch that woke while the
         // phone app was closed has a queued application context waiting, and the
         // session has to be live for the system to hand it over.
+        WatchBridge.shared.container = store.container
         WatchBridge.shared.activate()
     }
 

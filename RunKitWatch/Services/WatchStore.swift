@@ -37,6 +37,25 @@ final class WatchStore: NSObject {
         }
     }
 
+    /// Queue a finished run for the phone.
+    ///
+    /// `transferFile`, not `sendMessage`: the run must survive the phone being out
+    /// of range for its entire duration, and an hour of route at 1 Hz is past what a
+    /// message will carry. The system persists the queue to disk and retries on its
+    /// own, so this succeeds even if the phone is left at home all day.
+    func send(_ payload: WatchSessionPayload) {
+        guard let session, let data = WatchLink.encode(payload) else { return }
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "\(WatchLink.sessionFilePrefix)\(payload.id.uuidString).json")
+        do {
+            try data.write(to: url)
+            session.transferFile(url, metadata: nil)
+        } catch {
+            // Nothing useful to do — the run is already saved to HealthKit on the
+            // watch, so it is not lost, it just won't appear in RunKit's own history.
+        }
+    }
+
     /// Decodes a context payload into the published menu. Ignores anything it can't
     /// read, so a malformed or future payload leaves the last good menu in place
     /// rather than blanking the screen mid-run.
@@ -63,5 +82,12 @@ extension WatchStore: WCSessionDelegate {
 
     func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
         adopt(context)
+    }
+
+    /// The system copies the file before queueing it, so the temp copy we wrote is
+    /// ours to clean up. Left alone these accumulate in the watch's tmp directory.
+    func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
+        guard error == nil else { return }   // still queued for retry — leave it
+        try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
     }
 }

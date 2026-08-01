@@ -91,15 +91,32 @@ struct WatchMenu: Codable, Hashable {
     var recipes: [Item] = []
     /// The user's saved workouts, favourites first.
     var custom: [Item] = []
+    /// Heart-rate zone inputs, resolved on the phone — it's the side with the user's
+    /// max-HR override, their age from the suite profile, and a resting HR from
+    /// Health. The watch derives the five zone bounds from these so a heart-rate
+    /// card is judged against the same numbers on both devices.
+    var maxHR: Double = 0
+    var restingHR: Double = 0
 
     var unit: UnitSystem { UnitSystem(rawValue: unitRaw) ?? .metric }
 
+    /// The zone bounds a heart-rate card is judged against. Empty when the phone has
+    /// never synced a max HR, which the caller must treat as "don't nudge" rather
+    /// than as zone 1.
+    var zones: [HeartRateZones.Zone] {
+        guard maxHR > 0 else { return [] }
+        return HeartRateZones.zones(maxHR: maxHR, restingHR: restingHR > 0 ? restingHR : nil)
+    }
+
     init(unitRaw: String = UnitSystem.metric.rawValue,
-         scheduledToday: [Item] = [], recipes: [Item] = [], custom: [Item] = []) {
+         scheduledToday: [Item] = [], recipes: [Item] = [], custom: [Item] = [],
+         maxHR: Double = 0, restingHR: Double = 0) {
         self.unitRaw = unitRaw
         self.scheduledToday = scheduledToday
         self.recipes = recipes
         self.custom = custom
+        self.maxHR = maxHR
+        self.restingHR = restingHR
     }
 
     init(from decoder: Decoder) throws {
@@ -108,6 +125,8 @@ struct WatchMenu: Codable, Hashable {
         scheduledToday = try c.decodeIfPresent([Item].self, forKey: .scheduledToday) ?? []
         recipes = try c.decodeIfPresent([Item].self, forKey: .recipes) ?? []
         custom = try c.decodeIfPresent([Item].self, forKey: .custom) ?? []
+        maxHR = try c.decodeIfPresent(Double.self, forKey: .maxHR) ?? 0
+        restingHR = try c.decodeIfPresent(Double.self, forKey: .restingHR) ?? 0
     }
 
     /// A plain open run of the given activity — the "Start Run" button, and the
@@ -125,6 +144,12 @@ struct WatchMenu: Codable, Hashable {
 enum WatchLink {
     /// Application-context key carrying an encoded `WatchMenu`.
     static let menuKey = "menu"
+    /// Filename prefix for a transferred `WatchSessionPayload`.
+    static let sessionFilePrefix = "runkit-session-"
+
+    static func decode<T: Decodable>(_ type: T.Type, from data: Data) -> T? {
+        try? JSONDecoder().decode(type, from: data)
+    }
 
     static func encode<T: Encodable>(_ value: T) -> Data? {
         try? JSONEncoder().encode(value)

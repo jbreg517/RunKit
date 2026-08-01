@@ -66,16 +66,19 @@ targets:
     platform: watchOS
     sources:
       - path: RunKitWatch
-      - path: RunKit/Shared/WatchMenu.swift          # wire format, shared with the app
+      - path: RunKit/Shared/WatchMenu.swift          # menu wire format
+      - path: RunKit/Shared/WatchSession.swift       # finished-run wire format
       - path: RunKit/Models/ActivitySegment.swift    # the card model itself
       - path: RunKit/Enums/ActivityType.swift
       - path: RunKit/Enums/WorkoutType.swift
       - path: RunKit/Enums/WorkoutRecipe.swift
       - path: RunKit/Services/UnitSystem.swift
+      - path: RunKit/Services/HeartRateZones.swift   # zone bounds for HR cards
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ferrixguild.runkit.watchkitapp
         INFOPLIST_FILE: RunKitWatch/Info.plist
+        CODE_SIGN_ENTITLEMENTS: RunKitWatch/RunKitWatch.entitlements
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor

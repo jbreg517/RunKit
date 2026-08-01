@@ -60,23 +60,12 @@ struct WatchStartView: View {
         }
     }
 
-    // NOTE (v0.51): recording lands in v0.52 with `WatchSessionView`. This build
-    // exists to prove the watch target compiles, signs and installs before ~1000
-    // lines of HealthKit go into it — so the button is present and laid out, but
-    // deliberately inert rather than pretending to work.
     private var startButton: some View {
-        VStack(spacing: RKWSpacing.sm) {
-            Button {
-            } label: {
-                Label("Start", systemImage: "play.fill")
-            }
-            .buttonStyle(RKWPrimaryButtonStyle())
-            .disabled(true)
-
-            Text("Recording arrives in the next build.")
-                .font(RKWFont.caption)
-                .foregroundStyle(RKW.textMuted)
-                .multilineTextAlignment(.center)
+        NavigationLink {
+            WatchSessionView(item: item)
+        } label: {
+            Label("Start", systemImage: "play.fill")
         }
+        .buttonStyle(RKWPrimaryButtonStyle())
     }
 }

@@ -12,6 +12,12 @@ struct RunKitWatchApp: App {
     var body: some Scene {
         WindowGroup {
             WatchRootView()
+                .task {
+                    // Asked at launch, not at Start. A HealthKit permission sheet
+                    // appearing over a run that has already begun costs the user the
+                    // first minute of it.
+                    await WatchWorkoutController.shared.requestAuthorization()
+                }
         }
     }
 }

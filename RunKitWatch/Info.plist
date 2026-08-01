@@ -28,5 +28,18 @@
 	<true/>
 	<key>WKCompanionAppBundleIdentifier</key>
 	<string>com.ferrixguild.runkit</string>
+	<!-- Without workout-processing the app is suspended the moment the wrist drops,
+	     which stops the card engine, the interval timer and the haptics mid-run. -->
+	<key>WKBackgroundModes</key>
+	<array>
+		<string>workout-processing</string>
+		<string>location</string>
+	</array>
+	<key>NSHealthShareUsageDescription</key>
+	<string>RunKit reads your heart rate, distance and energy while you record a walk, run or ride, so it can show live metrics and hold you to a heart-rate zone. This stays on your device.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>RunKit saves the walks, runs and rides you record on your watch to Apple Health, including route, distance and active energy.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>RunKit uses your location only while you’re recording a walk, run or ride, to map your route. Routes stay on your device.</string>
 </dict>
 </plist>

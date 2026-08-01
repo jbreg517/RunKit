@@ -17,9 +17,17 @@ import WatchConnectivity
 final class WatchBridge: NSObject {
     static let shared = WatchBridge()
 
+    /// Set at launch by `RunKitApp`. Runs arrive by file transfer while no view is
+    /// on screen — often with the app woken in the background — so importing them
+    /// can't depend on a `@Environment` context from a view that may not exist.
+    var container: ModelContainer?
+
     /// Last menu handed to the system, so an unchanged one isn't re-sent on every
     /// foreground. `WatchMenu` is `Hashable` precisely for this comparison.
     private var lastSent: WatchMenu?
+
+    /// Resting HR, read from Health once and cached. Refreshed by `refreshHRInputs`.
+    private var restingHR: Double = 0
 
     private var session: WCSession? {
         WCSession.isSupported() ? WCSession.default : nil
@@ -38,7 +46,7 @@ final class WatchBridge: NSObject {
     func publish(from context: ModelContext, unit: UnitSystem) {
         guard let session, session.activationState == .activated, session.isPaired else { return }
 
-        let menu = Self.buildMenu(from: context, unit: unit)
+        let menu = buildMenu(from: context, unit: unit)
         guard menu != lastSent else { return }
         guard let data = WatchLink.encode(menu) else { return }
         do {
@@ -52,12 +60,31 @@ final class WatchBridge: NSObject {
 
     // MARK: - Building the menu
 
+    /// Pulls the resting heart rate the zone maths needs. Async and cached, because
+    /// `publish` runs synchronously on every foreground and must not await Health.
+    func refreshHRInputs() async {
+        if let resting = await HealthService.shared.latestRestingHeartRate(), resting > 0 {
+            await MainActor.run {
+                self.restingHR = resting
+                self.lastSent = nil     // zone bounds changed — force a republish
+            }
+        }
+    }
+
     @MainActor
-    private static func buildMenu(from context: ModelContext, unit: UnitSystem) -> WatchMenu {
-        WatchMenu(unitRaw: unit.rawValue,
-                  scheduledToday: scheduledItems(context),
-                  recipes: recipeItems(),
-                  custom: customItems(context))
+    private func buildMenu(from context: ModelContext, unit: UnitSystem) -> WatchMenu {
+        // Resolved here rather than on the watch: this is the side that has the
+        // user's max-HR override and their age from the suite profile.
+        let override = UserDefaults.standard.double(forKey: "maxHeartRate")
+        let maxHR = HeartRateZones.maxHeartRate(override: override,
+                                                observed: nil,
+                                                age: SuiteProfileStore.load()?.age ?? 0)
+        return WatchMenu(unitRaw: unit.rawValue,
+                         scheduledToday: Self.scheduledItems(context),
+                         recipes: Self.recipeItems(),
+                         custom: Self.customItems(context),
+                         maxHR: maxHR,
+                         restingHR: restingHR)
     }
 
     /// Due today, plus anything carried forward from a missed day — the same rule
@@ -137,5 +164,82 @@ extension WatchBridge: WCSessionDelegate {
     /// the content is unchanged.
     func sessionWatchStateDidChange(_ session: WCSession) {
         DispatchQueue.main.async { self.lastSent = nil }
+    }
+
+    /// A run recorded on the wrist.
+    ///
+    /// The file is deleted the moment this method returns, so the bytes are read
+    /// **synchronously** here and the import is dispatched with the data in hand.
+    func session(_ session: WCSession, didReceive file: WCSessionFile) {
+        guard let data = try? Data(contentsOf: file.fileURL),
+              let payload = WatchLink.decode(WatchSessionPayload.self, from: data) else { return }
+        DispatchQueue.main.async { self.importSession(payload) }
+    }
+}
+
+// MARK: - Importing a wrist-recorded run
+
+extension WatchBridge {
+
+    @MainActor
+    func importSession(_ payload: WatchSessionPayload) {
+        guard let container else { return }
+        let context = ModelContext(container)
+
+        // WatchConnectivity can deliver a queued file more than once, and the watch
+        // resends on failure. The payload id is stable across those retries, so this
+        // fetch is what stops a run being logged twice.
+        let id = payload.id
+        var existing = FetchDescriptor<ActivitySession>(predicate: #Predicate { $0.id == id })
+        existing.fetchLimit = 1
+        guard (try? context.fetch(existing))?.isEmpty ?? true else { return }
+
+        let s = ActivitySession(type: payload.activity, startedAt: payload.startedAt)
+        s.id = payload.id
+        s.endedAt = payload.endedAt
+        s.activeSeconds = payload.activeSeconds
+        s.pausedSeconds = payload.pausedSeconds
+        s.distanceMeters = payload.distanceMeters
+        s.activeEnergyKcal = payload.activeEnergyKcal
+        s.usedGPS = payload.usedGPS
+        s.avgHeartRateBpm = payload.avgHeartRateBpm
+        s.maxHeartRateBpm = payload.maxHeartRateBpm
+        s.hrZoneSecondsJSON = HeartRateZones.encode(payload.hrZoneSeconds)
+        // Already summarised on the wrist from live samples, so backfill must not
+        // re-examine it — and a non-nil `hrCheckedAt` is how backfill knows to skip.
+        s.hrCheckedAt = Date()
+        s.customStepsJSON = ActivitySegment.encode(payload.segments)
+        s.customWorkoutName = payload.workoutName
+        s.workoutTypeRaw = ActivitySegment.workoutType(for: payload.segments).rawValue
+
+        // Session first: the route points set a relationship to it, and attaching to
+        // an object the context doesn't know about yet is asking for trouble.
+        context.insert(s)
+        for p in payload.route {
+            let point = RoutePoint(timestamp: p.t, latitude: p.lat, longitude: p.lon,
+                                   altitude: p.alt, horizontalAccuracy: p.acc, speed: p.spd)
+            point.session = s
+            context.insert(point)
+        }
+
+        if let scheduleID = payload.scheduleID {
+            var descriptor = FetchDescriptor<ScheduledRun>(predicate: #Predicate { $0.id == scheduleID })
+            descriptor.fetchLimit = 1
+            if let run = try? context.fetch(descriptor).first, !run.isCompleted {
+                run.isCompleted = true
+                run.completedAt = payload.endedAt
+            }
+        }
+
+        Persist.save(context, "watch session import")
+
+        // Deliberately NOT written to HealthKit. The watch already saved this run,
+        // with its own route — saving again would put a duplicate workout in Health
+        // and double the active energy, which then flows into FuelKit as real intake
+        // headroom.
+
+        SuiteActivityPublisher.publish(from: context)
+        let unit = UnitSystem(rawValue: UserDefaults.standard.string(forKey: "unitSystem") ?? "") ?? .metric
+        publish(from: context, unit: unit)
     }
 }

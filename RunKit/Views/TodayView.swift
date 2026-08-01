@@ -104,6 +104,12 @@ struct TodayView: View {
                 SuiteActivityPublisher.publish(from: context)
                 WatchBridge.shared.publish(from: context, unit: unit)
             }
+            .task {
+                // Resting HR for the watch's zone bounds. Async and separate from
+                // the publish above, which must stay synchronous.
+                await WatchBridge.shared.refreshHRInputs()
+                WatchBridge.shared.publish(from: context, unit: unit)
+            }
             .sheet(item: $sheet) { which in
                 switch which {
                 case .builder:
