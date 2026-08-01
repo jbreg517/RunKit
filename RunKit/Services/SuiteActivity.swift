@@ -68,14 +68,20 @@ struct SuiteDailyLoad: Codable, Equatable {
     /// Session RPE 1–10 when the user gave one, else 0.
     var perceivedEffort: Double = 0
     var sessionCount: Int = 0
+    /// Absolute active energy burned that day (kcal). Unlike `load`, this is a real
+    /// number, published so FuelKit can subtract exercise burn **when HealthKit is
+    /// off** (the App-Group fallback in the precedence rule). When Health is on,
+    /// HealthKit's own sum wins and this is ignored, so the two never double-count.
+    var activeKcal: Double = 0
 
     init(date: Date = Date(), kind: SuiteSessionKind = .rest, load: Double = 0,
-         perceivedEffort: Double = 0, sessionCount: Int = 0) {
+         perceivedEffort: Double = 0, sessionCount: Int = 0, activeKcal: Double = 0) {
         self.date = date
         self.kind = kind
         self.load = load
         self.perceivedEffort = perceivedEffort
         self.sessionCount = sessionCount
+        self.activeKcal = activeKcal
     }
 
     /// Every field optional on the wire — see the note on `SuiteProfile.init(from:)`.
@@ -86,6 +92,7 @@ struct SuiteDailyLoad: Codable, Equatable {
         load            = try c.decodeIfPresent(Double.self, forKey: .load) ?? 0
         perceivedEffort = try c.decodeIfPresent(Double.self, forKey: .perceivedEffort) ?? 0
         sessionCount    = try c.decodeIfPresent(Int.self, forKey: .sessionCount) ?? 0
+        activeKcal      = try c.decodeIfPresent(Double.self, forKey: .activeKcal) ?? 0
     }
 }
 
@@ -183,6 +190,7 @@ enum SuiteActivityStore {
             .sorted { $0.date < $1.date }
         guard let data = try? JSONEncoder().encode(trimmed) else { return }
         defaults.set(data, forKey: key(for: trimmed.source))
+        SuiteNotifier.post()   // nudge running sibling apps to refresh at once
     }
 
     /// One app's feed, if it has published one. Nil when that app isn't installed,
@@ -242,6 +250,7 @@ enum SuiteActivityStore {
             merged.load = min(1, merged.load + entry.load)
             merged.perceivedEffort = max(merged.perceivedEffort, entry.perceivedEffort)
             merged.sessionCount += entry.sessionCount
+            merged.activeKcal += entry.activeKcal   // absolute kcal sums (FuelKit's Health-off fallback)
             if merged.kind == .rest { merged.kind = entry.kind }
         }
         return merged
@@ -262,5 +271,42 @@ enum SuiteActivityStore {
             .flatMap(\.planned)
             .filter { $0.date >= today }
             .sorted { $0.date < $1.date }
+    }
+}
+
+// MARK: - Cross-process change signal
+//
+// App Group `UserDefaults` writes don't notify other processes, so a sibling app
+// only picked up changes on its next foreground. This posts a Darwin notification
+// on every shared write (profile or activity); running apps refresh immediately —
+// which matters in iPad Split View / Slide Over where two suite apps are visible at
+// once. Byte-identical across the three apps (part of the shared `SuiteActivity`
+// contract).
+enum SuiteNotifier {
+    /// Name of the cross-process Darwin signal.
+    private static let darwinName = "com.ferrixguild.suite.changed"
+    /// Local `NotificationCenter` name views observe (the Darwin callback is a bare C
+    /// function pointer that can't capture context, so it's bridged to this).
+    static let changed = Notification.Name("com.ferrixguild.suite.changed.local")
+    private static var bridging = false
+
+    /// Post after writing shared App Group data (profile or activity).
+    static func post() {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(darwinName as CFString), nil, nil, true)
+    }
+
+    /// Bridge the Darwin signal to `SuiteNotifier.changed`. Call once at launch;
+    /// idempotent. Views then observe `SuiteNotifier.changed` to refresh.
+    static func startBridging() {
+        guard !bridging else { return }
+        bridging = true
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(), nil,
+            { _, _, _, _, _ in
+                NotificationCenter.default.post(name: SuiteNotifier.changed, object: nil)
+            },
+            darwinName as CFString, nil, .deliverImmediately)
     }
 }

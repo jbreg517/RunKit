@@ -62,11 +62,13 @@ enum SuiteActivityPublisher {
 
         return byDay.map { day, daySessions in
             let total = daySessions.reduce(0.0) { $0 + strain(of: $1) }
+            let kcal = daySessions.reduce(0.0) { $0 + $1.activeEnergyKcal }
             return SuiteDailyLoad(date: day,
                                   kind: .cardio,
                                   load: min(1, total / reference),
                                   perceivedEffort: 0,   // RunKit never asks for RPE
-                                  sessionCount: daySessions.count)
+                                  sessionCount: daySessions.count,
+                                  activeKcal: kcal)
         }
         .sorted { $0.date < $1.date }
     }

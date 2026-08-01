@@ -88,6 +88,7 @@ enum SuiteProfileStore {
         p.updatedAt = Date()
         if let data = try? JSONEncoder().encode(p) {
             defaults.set(data, forKey: key)
+            SuiteNotifier.post()   // nudge running sibling apps to reconcile at once
         }
     }
 }

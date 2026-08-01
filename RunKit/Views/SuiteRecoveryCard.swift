@@ -29,6 +29,9 @@ struct SuiteRecoveryCard: View {
             }
         }
         .onAppear(perform: refresh)
+        // Refresh the instant a sibling app publishes (iPad multitasking), not just
+        // on the next foreground.
+        .onReceive(NotificationCenter.default.publisher(for: SuiteNotifier.changed)) { _ in refresh() }
     }
 
     private func refresh() {
