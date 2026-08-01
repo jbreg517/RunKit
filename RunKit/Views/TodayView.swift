@@ -75,6 +75,7 @@ struct TodayView: View {
             ScrollView {
                 VStack(spacing: RKSpacing.lg) {
                     startRunButton
+                    SuiteRecoveryCard()
                     todayRow
                     ActivityCalendarView(sessions: sessions, scheduled: scheduled) { day in
                         sheet = .day(day)
