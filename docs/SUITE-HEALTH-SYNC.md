@@ -32,14 +32,16 @@ in sync.
   macros) finally see FuelKit's food. Same re-authorisation caveat — the dietary
   *write* types are new.
 
-**Deferred (next step):**
-- **App-Group `activeKcal` fallback** for the Health-*off* path (precedence rule
-  step 2). Requires adding the `SuiteActivity` channel + a publisher to **LiftKit**,
-  which today has no such channel — a new file in LiftKit's real `.pbxproj` (not
-  XcodeGen), so it needs pbxproj surgery and can't be compile-checked locally.
-  Until then, the LiftKit→FuelKit burn path works only with Health authorised.
-- **Darwin-notification change signal** (§4) — apps currently reconcile on
-  foreground, not the instant another app writes.
+- **SuiteActivity fully wired (2026-08-01)** — LiftKit publishes lifting load +
+  planned workouts (`LiftKitActivityPublisher`); RunKit publishes runs and reads
+  others' load for recovery (`SuiteRecoveryCard`); FuelKit reads load + plans
+  (`SuiteTrainingCard`).
+- **App-Group `activeKcal` fallback (2026-08-01)** — LiftKit/RunKit publish each
+  day's absolute burn in `SuiteDailyLoad.activeKcal`; FuelKit subtracts it when
+  Health is off, and HealthKit's sum when it's on (never both). Closes gap 1.
+- **Darwin change-signal (2026-08-01)** — `SuiteNotifier` posts on every shared
+  write (profile + activity); each app bridges at launch and its cross-app views
+  refresh at once (iPad multitasking). Closes gap 2.
 
 This is a design spec; the sections below are the target design regardless of what
 is wired yet.
@@ -194,11 +196,9 @@ FuelKit and RunKit consume it (RunKit reads others' load only, excluding its own
 
 ### Open gaps (this audit)
 
-- **App-Group energy fallback (Health-off path) not built.** `activeEnergyBurned`
-  only crosses via HealthKit; with Health off there's no `activeKcal` on the App
-  Group, so FuelKit's burn reads 0 (precedence rule §2 step 2).
-- **No Darwin change-signal** — the profile + activity reconcile on foreground, not
-  the instant another app writes.
+Gaps 1 (App-Group energy fallback) and 2 (Darwin change-signal) are now **closed**
+— see the implementation-status notes at the top. Remaining, by design:
+
 - **`SuiteProfile` carries no shared *consumed* macros** — FuelKit's daily macro
   totals reach LiftKit only through HealthKit's dietary types (needs Health in both
   apps). Deliberate: no App-Group macro mirror.
