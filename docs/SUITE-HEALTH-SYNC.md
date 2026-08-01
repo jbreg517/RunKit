@@ -24,6 +24,13 @@ in sync.
   precedence rule and fixes "LiftKit's workout burn never appears in FuelKit"
   whenever Health is on. **Existing FuelKit users who already granted Health must
   re-trigger authorisation** (toggle off/on) to grant the new read type.
+- **FuelKit writes dietary energy + macros** (2026-08-01) —
+  `HealthKitManager.saveNutrition(...)` publishes each day's calories + protein/
+  carb/fat to HealthKit (source-scoped delete-and-rewrite so totals never
+  double-count), hooked into `NutritionLog` after every add/edit/delete and mirrored
+  for the viewed day. This is what lets LiftKit (which already reads dietary energy +
+  macros) finally see FuelKit's food. Same re-authorisation caveat — the dietary
+  *write* types are new.
 
 **Deferred (next step):**
 - **App-Group `activeKcal` fallback** for the Health-*off* path (precedence rule
@@ -125,26 +132,76 @@ default and not requested at onboarding, and the seed only reads the App Group.
   copies the latest HK bodyweight into `latestWeightLb` (guarded by a small delta
   so it doesn't churn). FuelKit already does this in `NutritionView.task`.
 
-## 5. Field ownership matrix
+## 5. Field matrix — what each app reads & writes (audited 2026-08-01)
 
-R = reads it, W = writes it. "Channel" is the source of truth per the precedence
-rule.
+**R** = reads, **W** = writes, **—** = not touched. Verified against each app's
+HealthKit `readTypes` / `shareTypes` and the App Group stores.
 
-| Field | LiftKit | FuelKit | RunKit | Channel |
-|---|---|---|---|---|
-| bodyweight | R/W | R/W | R | HK `bodyMass` + App Group mirror |
-| height | R/W | R/W | R | HK `height` + App Group mirror |
-| age / DOB | R | R | R | HK `dateOfBirth` (prefill) → App Group |
-| biological sex | R | R | R | HK `biologicalSex` (prefill) → App Group |
-| goal + macro targets | R/W | R/W | R | App Group only |
-| **active energy (kcal/day)** | **W** | **R** | **W** | HK `activeEnergyBurned`; App-Group rollup when HK off |
-| dietary energy (kcal/day) | R | W | — | HK `dietaryEnergyConsumed` |
-| training load 0–1 | R/W | R | R/W | App Group `SuiteActivity` |
+### HealthKit
 
-**Gaps to close:** FuelKit does not currently read `activeEnergyBurned` at all
-(its `readTypes` is weight/height/sex/DOB) — this is why LiftKit's calorie burn
-never reaches it. And there is no `activeKcal` on the App Group channel for the
-Health-off path.
+| Type | LiftKit | FuelKit | RunKit |
+|---|---|---|---|
+| `HKWorkout` (+ activity type) | R/W | — | W |
+| `HKWorkoutRoute` (GPS) | — | — | W |
+| `activeEnergyBurned` | R/W | R | R/W |
+| `dietaryEnergyConsumed` | R | W | — |
+| `dietaryProtein` / `dietaryCarbohydrates` / `dietaryFatTotal` | R | W | — |
+| `bodyMass` | R/W | R/W | R |
+| `height` | R/W | R/W | — |
+| `distanceWalkingRunning` | R | — | W |
+| `distanceCycling` | R | — | W |
+| `stepCount` / `flightsClimbed` | — | — | R |
+| `heartRate` / `restingHeartRate` / `heartRateVariabilitySDNN` / `vo2Max` / `heartRateRecoveryOneMinute` | — | — | R |
+| `biologicalSex` / `dateOfBirth` (characteristics, read-only) | R | R | — |
+
+LiftKit writes workouts + their burn and reads others' workouts/energy/distance for
+a unified history. RunKit writes runs/rides (workout + route + energy + distance)
+and reads the HR family (Watch-supplied). FuelKit writes food (energy + macros) and
+reads energy for its calorie budget. Sex/DOB are user-set in the Health app and can
+only be read.
+
+### App Group — `SuiteProfile` (`SuiteProfileStore`, key `suiteHealthProfile`)
+
+One shared JSON blob; every field forward/backward compatible (§7).
+
+| Field | LiftKit | FuelKit | RunKit |
+|---|---|---|---|
+| heightInches | R/W | R/W | — |
+| age | R/W | R/W | R |
+| biologicalSex | R/W | R/W | — |
+| latestWeightLb | R/W | R/W | R |
+| goalType / goalWeightLb / weeklyRateLb | R/W | R/W | — |
+| activityLevel | R/W | R/W | — |
+| proteinPerLb / fatPercent | R/W | R/W | — |
+| updatedAt | newest-wins reconcile marker (all apps) | | |
+
+RunKit is a read-only consumer (weight for calorie math, age for HR zones); LiftKit
+and FuelKit both edit the goal + measurements.
+
+### App Group — `SuiteActivity` (`SuiteActivityStore`, keys `suiteActivityFeed.<app>`)
+
+`SuiteDailyLoad` (date, kind, load 0–1, perceivedEffort, sessionCount) +
+`SuitePlannedSession` (date, kind, title, plannedMinutes, plannedLoad).
+
+| App | Role |
+|---|---|
+| RunKit | **W** — publishes daily load + planned runs |
+| FuelKit | ships the store code, **no reader wired yet** |
+| LiftKit | **absent** — has no `SuiteActivity` file |
+
+### Open gaps (this audit)
+
+- **`SuiteActivity` has no consumer.** RunKit publishes into it, but nothing reads:
+  wire FuelKit to read `totalLoad`/`upcoming` (adjust the calorie budget / show
+  upcoming sessions) and give LiftKit the channel so it publishes lifting load +
+  planned workouts.
+- **App-Group energy fallback (Health-off path) not built.** `activeEnergyBurned`
+  only crosses via HealthKit; with Health off there's no `activeKcal` on the App
+  Group, so FuelKit's burn reads 0 (precedence rule §2 step 2).
+- **No Darwin change-signal** — the profile reconciles on foreground, not instantly.
+- **`SuiteProfile` carries no shared *consumed* macros** — FuelKit's daily macro
+  totals reach LiftKit only through HealthKit (dietary types), which needs Health
+  authorised in both apps. There is deliberately no App-Group macro mirror.
 
 ## 6. What the user is told
 
