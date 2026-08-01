@@ -186,15 +186,21 @@ and FuelKit both edit the goal + measurements.
 | App | Role |
 |---|---|
 | RunKit | **W** — publishes daily load + planned runs |
-| FuelKit | ships the store code, **no reader wired yet** |
-| LiftKit | **absent** — has no `SuiteActivity` file |
+| FuelKit | **R** — `SuiteTrainingCard` shows today's cross-app load + next planned session (informational only, never touches the calorie math) |
+| LiftKit | **absent** — has no `SuiteActivity` file, so it neither publishes nor reads |
 
 ### Open gaps (this audit)
 
-- **`SuiteActivity` has no consumer.** RunKit publishes into it, but nothing reads:
-  wire FuelKit to read `totalLoad`/`upcoming` (adjust the calorie budget / show
-  upcoming sessions) and give LiftKit the channel so it publishes lifting load +
-  planned workouts.
+- **LiftKit is missing from `SuiteActivity` entirely.** It should publish its
+  lifting load + planned workouts (a `SuiteActivityPublisher` like RunKit's) so the
+  channel carries strength training, not just runs. This is the **enabler** for the
+  next item.
+- **RunKit doesn't consume `SuiteActivity`.** It should read
+  `totalLoad(excluding: .runkit)` for recovery-aware guidance ("you lifted hard
+  yesterday — take it easy"). Only meaningful once LiftKit publishes, since RunKit
+  excludes its own feed and is currently the sole producer. FuelKit's consumer
+  (`SuiteTrainingCard`) already reads the channel — so RunKit's runs surface in
+  FuelKit today; LiftKit's lifts will once it publishes.
 - **App-Group energy fallback (Health-off path) not built.** `activeEnergyBurned`
   only crosses via HealthKit; with Health off there's no `activeKcal` on the App
   Group, so FuelKit's burn reads 0 (precedence rule §2 step 2).
