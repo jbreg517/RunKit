@@ -28,6 +28,11 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     /// estimate over a trailing window, both reset at the start of each track.
     private(set) var coordinates: [CLLocationCoordinate2D] = []
     private(set) var currentSpeedMps: Double = 0
+    /// True during an auto-pause: fixes still arrive and still update
+    /// `currentSpeedMps`, but nothing is counted or drawn.
+    private(set) var isHeld = false
+    /// Last fix seen while held, for the direct speed calculation above.
+    private var heldFix: CLLocation?
     private var speedSamples: [(t: Date, d: Double)] = []
     private let speedWindow: TimeInterval = 20
 
@@ -86,8 +91,35 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         lastFixTime = nil
         speedSamples = []
         currentSpeedMps = 0
+        isHeld = false
         isTracking = true
         manager.startUpdatingLocation()
+    }
+
+    /// Auto-pause: keep the receiver running but stop counting.
+    ///
+    /// Distinct from `pauseTracking()`, which suspends GPS entirely. A *manual*
+    /// pause is the user saying "I've stopped for a while", so dropping GPS saves
+    /// battery and avoids drift. An *automatic* pause has to keep measuring speed —
+    /// it is the only way anything can decide you've started again.
+    ///
+    /// Distance, route and gap detection are all frozen, so a wandering receiver on
+    /// a stationary wrist can't invent metres.
+    func holdTracking() {
+        isHeld = true
+        currentSpeedMps = 0
+        heldFix = nil
+    }
+
+    /// End an auto-pause. Re-anchors like `resumeTracking()` so the stationary
+    /// stretch is neither counted nor drawn as a straight line across the map.
+    func releaseTracking() {
+        isHeld = false
+        lastLocation = nil
+        lastFixTime = nil
+        speedSamples = []
+        currentSpeedMps = 0
+        heldFix = nil
     }
 
     // MARK: CLLocationManagerDelegate
@@ -101,6 +133,23 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         for loc in locations {
             // Drop noisy / invalid fixes.
             guard loc.horizontalAccuracy >= 0, loc.horizontalAccuracy < 50 else { continue }
+
+            // Auto-paused: measure speed, count nothing. `speedSamples` is derived
+            // from `distanceMeters`, which is frozen here, so speed has to come
+            // straight from consecutive fixes instead.
+            if isHeld {
+                if let prev = heldFix {
+                    let dt = loc.timestamp.timeIntervalSince(prev.timestamp)
+                    if dt >= 1 {
+                        currentSpeedMps = max(0, loc.distance(from: prev) / dt)
+                        heldFix = loc
+                    }
+                } else {
+                    heldFix = loc
+                }
+                continue
+            }
+
             var estimated = false
             if let last = lastLocation {
                 let step = loc.distance(from: last)

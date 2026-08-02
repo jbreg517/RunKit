@@ -65,7 +65,7 @@ struct WatchSessionView: View {
 
     private var title: String {
         switch controller.phase {
-        case .paused:  return "Paused"
+        case .paused:  return controller.autoPaused ? "Auto-paused" : "Paused"
         case .ending:  return "Saving…"
         case .saved:   return "Done"
         default:       return item.activity.rawValue

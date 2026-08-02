@@ -30,6 +30,7 @@ struct ActivitySessionView: View {
     @AppStorage("gpsEnabled") private var gpsEnabled = true
     @AppStorage("unitSystem") private var unitRaw = UnitSystem.metric.rawValue
     @AppStorage("voiceAnnouncements") private var voiceOn = true
+    @AppStorage("autoPause") private var autoPauseOn = true
     @AppStorage("maxHeartRate") private var maxHeartRateOverride = 0.0
     private var unit: UnitSystem { UnitSystem(rawValue: unitRaw) ?? .metric }
 
@@ -62,6 +63,12 @@ struct ActivitySessionView: View {
     /// engine, goals, pace — freezes for free while paused.
     @State private var pausedAt: Date?
     @State private var pausedTotal: TimeInterval = 0
+    /// True when the pause was decided by `autoPause` rather than by the user.
+    /// Kept apart so a manual pause is never undone automatically — someone who
+    /// tapped Pause has stopped on purpose, and starting to walk again is not
+    /// consent to resume recording.
+    @State private var autoPaused = false
+    @State private var autoPause = AutoPauseDetector.forActivity(.run)
     @State private var elapsed: TimeInterval = 0
     @State private var ticker: Timer?
     @State private var countdown: Int?
@@ -690,6 +697,8 @@ struct ActivitySessionView: View {
         elapsed = 0
         pausedAt = nil
         pausedTotal = 0
+        autoPaused = false
+        autoPause = AutoPauseDetector.forActivity(liveActivity)
         // Baseline the pedometer so `sessionMeters` can measure the delta when GPS
         // is off. Updates were started in `onAppear`, so by the time the user has
         // configured and started a session the reading is already live.
@@ -797,6 +806,9 @@ struct ActivitySessionView: View {
     /// Once-a-second update: timer, smoothed pace, unit marks, and the card engine.
     private func tick() {
         guard let start = startDate else { return }
+        // Before the pause guard: an auto-pause has to be able to end itself, and
+        // everything below this line is frozen while stopped.
+        updateAutoPause()
         // Paused: freeze the clock. Everything keyed off `elapsed` — the card
         // engine, goals, pace nudges, unit marks — stops with it.
         guard pausedAt == nil else { return }
@@ -996,7 +1008,9 @@ struct ActivitySessionView: View {
 
     /// Live Activity detail line (right side of the island / lock screen).
     private func liveDetail() -> String {
-        if pausedAt != nil { return "Paused" }
+        // Says *why* it stopped. A run that pauses itself and doesn't explain looks
+        // like a run that has silently broken.
+        if pausedAt != nil { return autoPaused ? "Auto-paused" : "Paused" }
         guard let seg = currentSegment else { return "Workout done" }
         if seg.goal == .intervals {
             return "\(intPhaseIsWork ? "WORK" : "REST") · \(intRep)/\(seg.reps)"
@@ -1039,12 +1053,52 @@ struct ActivitySessionView: View {
         if let since = pausedAt {
             pausedTotal += Date().timeIntervalSince(since)
             pausedAt = nil
-            if session?.usedGPS == true { location.resumeTracking() }
+            // Whichever kind of pause this was, resuming by hand clears it: an
+            // auto-pause released manually must not leave `autoPaused` set, or the
+            // detector would think it's still stopped.
+            if session?.usedGPS == true {
+                if autoPaused { location.releaseTracking() } else { location.resumeTracking() }
+            }
+            autoPaused = false
         } else {
             pausedAt = Date()
             if session?.usedGPS == true { location.pauseTracking() }
+            autoPaused = false
         }
+        autoPause.reset()
         pushLiveActivity()
+    }
+
+    /// Auto-pause. Only with GPS — the pedometer's distance is far too coarse to
+    /// tell "stopped at a light" from "running slowly", and guessing wrong either
+    /// drops real minutes or inflates the average pace.
+    private func updateAutoPause() {
+        guard autoPauseOn, gpsEnabled, session?.usedGPS == true else { return }
+        // A manual pause is not the detector's to undo.
+        guard autoPaused || pausedAt == nil else { return }
+        // Not until the run is genuinely under way. Speed reads 0 until the first
+        // GPS fix lands, which would otherwise auto-pause every run about five
+        // seconds after it starts. Distance past this mark proves both that GPS is
+        // live and that the runner is moving.
+        guard sessionMeters > 20 else { return }
+
+        switch autoPause.update(speedMps: location.currentSpeedMps, autoPaused: autoPaused) {
+        case .none:
+            break
+        case .pause:
+            guard pausedAt == nil else { return }
+            pausedAt = Date()
+            autoPaused = true
+            location.holdTracking()
+            pushLiveActivity()
+        case .resume:
+            guard let since = pausedAt else { return }
+            pausedTotal += Date().timeIntervalSince(since)
+            pausedAt = nil
+            autoPaused = false
+            location.releaseTracking()
+            pushLiveActivity()
+        }
     }
 
     private func finish() {

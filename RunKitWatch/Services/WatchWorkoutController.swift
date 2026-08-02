@@ -37,6 +37,10 @@ final class WatchWorkoutController: NSObject {
 
     private(set) var phase: Phase = .idle
     private(set) var summary: Summary?
+    /// True when `phase == .paused` because the runner stopped, not because they
+    /// tapped Pause. Drives the label, and keeps a manual pause from being undone
+    /// automatically.
+    private(set) var autoPaused = false
     /// Active seconds — paused time excluded, exactly like the phone.
     private(set) var elapsed: TimeInterval = 0
     private(set) var distanceMeters: Double = 0
@@ -77,6 +81,7 @@ final class WatchWorkoutController: NSObject {
     private var lastPaceUpdate: TimeInterval = 0
     /// Whole km/mi marks already signalled, so each split buzzes exactly once.
     private var markedUnits = 0
+    private var autoPause = AutoPauseDetector.forActivity(.run)
     private var latestSpeed: Double = 0
 
     private var maxBpm: Double = 0
@@ -129,6 +134,7 @@ final class WatchWorkoutController: NSObject {
         segments = item.segments.isEmpty ? ActivitySegment.starter : item.segments
 
         let activity = item.activity
+        autoPause = AutoPauseDetector.forActivity(activity)
         let config = HKWorkoutConfiguration()
         config.activityType = Self.hkActivity(activity)
         config.locationType = .outdoor
@@ -165,7 +171,8 @@ final class WatchWorkoutController: NSObject {
         segIndex = 0; segmentsDone = false; intRep = 1; intPhaseIsWork = true
         segStartElapsed = 0; segStartMeters = 0; phaseEndsAt = 0
         intervalsDone = false; lastNudge = 0; lastPaceUpdate = 0; latestSpeed = 0
-        markedUnits = 0; summary = nil
+        markedUnits = 0; summary = nil; autoPaused = false
+        autoPause.reset()
         maxBpm = 0; bpmSum = 0; bpmSamples = 0
         zoneSeconds = [Double](repeating: 0, count: 5)
         route = []; pendingLocations = []; usedGPS = false
@@ -176,19 +183,57 @@ final class WatchWorkoutController: NSObject {
 
     func pause() {
         guard phase == .running else { return }
-        pausedAt = Date()
-        phase = .paused
-        session?.pause()
+        applyPause(auto: false)
         WKInterfaceDevice.current().play(.stop)
     }
 
     func resume() {
-        guard phase == .paused, let since = pausedAt else { return }
-        pausedTotal += Date().timeIntervalSince(since)
+        guard phase == .paused else { return }
+        applyResume()
+        WKInterfaceDevice.current().play(.start)
+    }
+
+    private func applyPause(auto: Bool) {
+        pausedAt = Date()
+        phase = .paused
+        autoPaused = auto
+        autoPause.reset()
+        // The HealthKit session pauses too, so distance and energy stop accruing at
+        // the same instant our own clock does.
+        session?.pause()
+    }
+
+    private func applyResume() {
+        if let since = pausedAt { pausedTotal += Date().timeIntervalSince(since) }
         pausedAt = nil
         phase = .running
+        autoPaused = false
+        autoPause.reset()
         session?.resume()
-        WKInterfaceDevice.current().play(.start)
+    }
+
+    /// Auto-pause, using the same detector and thresholds as the phone so the same
+    /// traffic light doesn't produce two different average paces.
+    @MainActor
+    private func updateAutoPause() {
+        guard phase == .running || (phase == .paused && autoPaused) else { return }
+        // Not until the run is genuinely under way. Speed reads 0 until the first
+        // GPS fix lands, which would otherwise auto-pause every run about five
+        // seconds after it starts. Distance past this mark proves both that GPS is
+        // live and that the runner is moving.
+        guard distanceMeters > 20 else { return }
+        switch autoPause.update(speedMps: latestSpeed, autoPaused: autoPaused) {
+        case .none:
+            break
+        case .pause:
+            guard phase == .running else { return }
+            applyPause(auto: true)
+            WKInterfaceDevice.current().play(.stop)
+        case .resume:
+            guard phase == .paused else { return }
+            applyResume()
+            WKInterfaceDevice.current().play(.start)
+        }
     }
 
     /// Skip to the next card. The only way past an open card, and the reason an
@@ -221,7 +266,12 @@ final class WatchWorkoutController: NSObject {
 
     @MainActor
     private func tick() {
-        guard let start = startDate, phase == .running else { return }
+        guard let start = startDate else { return }
+        // Ahead of the running check: an auto-pause has to be able to end itself,
+        // and everything below is frozen while stopped. Location is never stopped on
+        // pause, so `latestSpeed` keeps arriving and can report movement again.
+        updateAutoPause()
+        guard phase == .running else { return }
         elapsed = Date().timeIntervalSince(start) - pausedTotal
 
         if elapsed - lastPaceUpdate >= 3 {
@@ -539,7 +589,11 @@ extension WatchWorkoutController: CLLocationManagerDelegate {
         guard !usable.isEmpty else { return }
         DispatchQueue.main.async {
             self.usedGPS = true
-            self.latestSpeed = max(0, usable.last?.speed ?? 0)
+            // A negative speed means CoreLocation couldn't compute one, which is
+            // common right after a fix. Treating that as 0 would look like a dead
+            // stop and auto-pause a run that's going fine, so keep the last known
+            // value instead.
+            if let speed = usable.last?.speed, speed >= 0 { self.latestSpeed = speed }
             self.pendingLocations.append(contentsOf: usable)
             self.route.append(contentsOf: usable.map {
                 WatchSessionPayload.Point(t: $0.timestamp,

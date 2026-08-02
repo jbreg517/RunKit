@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage("gpsEnabled") private var gpsEnabled = true
     @AppStorage("unitSystem") private var unitRaw = UnitSystem.metric.rawValue
     @AppStorage("voiceAnnouncements") private var voiceOn = true
+    @AppStorage("autoPause") private var autoPauseOn = true
     @AppStorage("voiceAccent") private var voiceAccent = VoiceAccent.british.rawValue
     @AppStorage("voiceGender") private var voiceGender = VoiceGender.female.rawValue
     @AppStorage("coachStyle") private var coachStyle = CoachStyle.system.rawValue
@@ -94,6 +95,13 @@ struct SettingsView: View {
         Section {
             Toggle("Use GPS for sessions", isOn: $gpsEnabled)
                 .tint(RKColor.accent)
+            // Only meaningful with GPS: the pedometer can't tell "stopped at a
+            // light" from "running slowly", and guessing wrong either drops real
+            // minutes or inflates the average pace.
+            if gpsEnabled {
+                Toggle("Auto-pause", isOn: $autoPauseOn)
+                    .tint(RKColor.accent)
+            }
             Toggle("Voice coaching", isOn: $voiceOn)
                 .tint(RKColor.accent)
             if voiceOn { voiceOptions }
