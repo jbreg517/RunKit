@@ -23,7 +23,8 @@ struct StatsView: View {
     @State private var tab: Segment = .summary
     @State private var period: StatsCalculator.Period = .month
     @State private var restingHR: Double?
-    @State private var vo2: Double?
+    @State private var fitness = CardioFitness.Series()
+    @State private var fitnessLoaded = false
     @State private var didBackfill = false
 
     private enum Segment: String, CaseIterable, Identifiable {
@@ -60,12 +61,15 @@ struct StatsView: View {
         }
     }
 
-    /// Reads the standing HR figures, then catches up any sessions whose summary
-    /// was never cached (recorded before v0.41, or before Health was granted).
-    /// Bounded per visit so a long history can't stall the screen.
+    /// Reads the standing figures Apple keeps for us — resting HR and the VO₂ max
+    /// series — then catches up any sessions whose summary was never cached
+    /// (recorded before v0.41, or before Health was granted). Bounded per visit so
+    /// a long history can't stall the screen.
     private func loadHeartRate() async {
         restingHR = await HealthService.shared.latestRestingHeartRate()
-        vo2 = await HealthService.shared.latestVO2Max()
+        let samples = await HealthService.shared.vo2MaxSamples(since: CardioFitness.windowStart())
+        fitness = CardioFitness.series(from: samples)
+        fitnessLoaded = true
         guard !didBackfill else { return }
         didBackfill = true
         let observed = sessions.map(\.maxHeartRateBpm).max()
@@ -107,6 +111,7 @@ struct StatsView: View {
                 loadCard
                 cadenceCard
                 heartRateCard
+                cardioFitnessCard
                 efficiencyCard
             }
             .padding(.vertical, RKSpacing.md)
@@ -269,9 +274,9 @@ struct StatsView: View {
                 if let restingHR {
                     smallStat("Resting", "\(Int(restingHR)) bpm")
                 }
-                if let vo2 {
-                    smallStat("VO₂ max", String(format: "%.1f", vo2))
-                }
+                // VO₂ max deliberately lives only in `cardioFitnessCard` now. Two
+                // copies could disagree — that card's window is twelve months, so a
+                // stale reading shows here and nowhere else.
                 smallStat("Sessions", "\(withHR.count)")
             }
         }
@@ -320,6 +325,19 @@ struct StatsView: View {
             return "\(pct)% easy. Polarized training suggests nearer 80% — consider slowing your easy runs."
         }
         return "Only \(pct)% easy. Running easy runs too hard is the most common amateur mistake; aim nearer 80%."
+    }
+
+    /// Apple's own VO₂ max estimate, charted over a year.
+    ///
+    /// Shown when there are readings, or when heart-rate data proves a Watch is in
+    /// play and their absence is worth explaining. Hidden otherwise: someone with
+    /// no Watch at all already gets that message from `heartRateCard`, and two
+    /// stacked "connect a Watch" panels is just noise.
+    @ViewBuilder
+    private var cardioFitnessCard: some View {
+        if fitnessLoaded, !fitness.isEmpty || sessions.contains(where: \.hasHeartRate) {
+            CardioFitnessCard(series: fitness)
+        }
     }
 
     /// Efficiency Factor — metres travelled per heartbeat — plus how it's moved.

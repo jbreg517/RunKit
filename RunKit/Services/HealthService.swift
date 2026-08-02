@@ -106,11 +106,38 @@ final class HealthService {
         await latestValue(.restingHeartRate, unit: .count().unitDivided(by: .minute()))
     }
 
+    /// ml/(kg·min) — the unit every VO₂ max figure in Health is expressed in,
+    /// regardless of the user's metric/imperial preference.
+    static let vo2Unit = HKUnit.literUnit(with: .milli)
+        .unitDivided(by: .gramUnit(with: .kilo).unitMultiplied(by: .minute()))
+
     func latestVO2Max() async -> Double? {
-        // ml/(kg·min)
-        let unit = HKUnit.literUnit(with: .milli)
-            .unitDivided(by: .gramUnit(with: .kilo).unitMultiplied(by: .minute()))
-        return await latestValue(.vo2Max, unit: unit)
+        await latestValue(.vo2Max, unit: Self.vo2Unit)
+    }
+
+    /// Every VO₂ max reading since `start`, oldest first.
+    ///
+    /// Apple writes these itself — the Watch estimates cardio fitness during
+    /// outdoor walks, runs and hikes — so this is purely a read. Samples are
+    /// sparse (at most a few a week, often fewer), which is why the caller asks
+    /// for a long window rather than the period the rest of Stats uses.
+    ///
+    /// An empty result is ambiguous by design: HealthKit does not reveal whether
+    /// a *read* was denied, so "no readings" and "no permission" look identical
+    /// here. The UI has to phrase its empty state to cover both.
+    func vo2MaxSamples(since start: Date) async -> [(date: Date, value: Double)] {
+        guard available, let type = HKQuantityType.quantityType(forIdentifier: .vo2Max) else { return [] }
+        let range = HKQuery.predicateForSamples(withStart: start, end: Date(), options: [])
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: type, predicate: range)],
+            sortDescriptors: [SortDescriptor(\.endDate, order: .forward)],
+            limit: HKObjectQueryNoLimit)
+        do {
+            return try await descriptor.result(for: store)
+                .map { ($0.endDate, $0.quantity.doubleValue(for: Self.vo2Unit)) }
+        } catch {
+            return []
+        }
     }
 
     /// Today's step total from Apple Health — the aggregated, cross-device figure the
