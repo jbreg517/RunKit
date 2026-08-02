@@ -41,6 +41,15 @@ final class WatchWorkoutController: NSObject {
     /// tapped Pause. Drives the label, and keeps a manual pause from being undone
     /// automatically.
     private(set) var autoPaused = false
+
+    /// A start date that already has paused time subtracted, so
+    /// `Text(timerInterval:)` shows the same number our own clock does.
+    ///
+    /// Needed because in Always-On the app is throttled to roughly one refresh a
+    /// minute — a label built from `elapsed` simply freezes. `Text(timerInterval:)`
+    /// is rendered and ticked by the system instead, the same trick the Live
+    /// Activity uses. Re-anchored on every resume.
+    private(set) var effectiveStart: Date?
     /// Active seconds — paused time excluded, exactly like the phone.
     private(set) var elapsed: TimeInterval = 0
     private(set) var distanceMeters: Double = 0
@@ -152,6 +161,7 @@ final class WatchWorkoutController: NSObject {
 
             let now = Date()
             startDate = now
+            effectiveStart = now
             s.startActivity(with: now)
             b.beginCollection(withStart: now) { _, _ in }
         } catch {
@@ -176,7 +186,7 @@ final class WatchWorkoutController: NSObject {
         maxBpm = 0; bpmSum = 0; bpmSamples = 0
         zoneSeconds = [Double](repeating: 0, count: 5)
         route = []; pendingLocations = []; usedGPS = false
-        pausedAt = nil; pausedTotal = 0; startDate = nil
+        pausedAt = nil; pausedTotal = 0; startDate = nil; effectiveStart = nil
     }
 
     // MARK: - Controls
@@ -206,6 +216,7 @@ final class WatchWorkoutController: NSObject {
     private func applyResume() {
         if let since = pausedAt { pausedTotal += Date().timeIntervalSince(since) }
         pausedAt = nil
+        effectiveStart = Date().addingTimeInterval(-elapsed)
         phase = .running
         autoPaused = false
         autoPause.reset()

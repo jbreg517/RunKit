@@ -8,6 +8,10 @@ import SwiftUI
 struct WatchSessionView: View {
     let item: WatchMenu.Item
     @Environment(\.dismiss) private var dismiss
+    /// `.inactive` is Always-On: the wrist is down, the screen is dimmed and
+    /// refreshing about once a minute. Not "the app is backgrounded" — the run is
+    /// still going, and this is the state the screen spends most of a run in.
+    @Environment(\.isLuminanceReduced) private var dimmed
     @State private var controller = WatchWorkoutController.shared
     @State private var page = 0
 
@@ -19,6 +23,11 @@ struct WatchSessionView: View {
                 summaryPage(summary)
             } else if case let .failed(reason) = controller.phase {
                 failedPage(reason)
+            } else if dimmed {
+                // Metrics only in Always-On. Paging dots and an End button are
+                // pointless on a screen you can't reliably tap, and rendering less
+                // is the whole point of the dimmed state.
+                metricsPage
             } else {
                 TabView(selection: $page) {
                     metricsPage.tag(0)
@@ -131,15 +140,15 @@ struct WatchSessionView: View {
     // MARK: Metrics
 
     private var metricsPage: some View {
-        VStack(alignment: .leading, spacing: RKWSpacing.md) {
-            if let detail = cardDetail {
+        VStack(alignment: .leading, spacing: dimmed ? RKWSpacing.lg : RKWSpacing.md) {
+            if let detail = cardDetail, !dimmed {
                 Text(detail)
                     .font(RKWFont.label)
                     .foregroundStyle(RKW.accent)
                     .lineLimit(1)
             }
-            Text(timeString(controller.elapsed))
-                .font(.system(size: 40, weight: .bold, design: .rounded))
+            elapsedLabel
+                .font(.system(size: dimmed ? 46 : 40, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(RKW.textPrimary)
                 .minimumScaleFactor(0.6)
@@ -149,10 +158,20 @@ struct WatchSessionView: View {
                 metric(unit.distanceString(controller.distanceMeters), "distance")
                 metric(paceText, paceLabel)
             }
-            HStack(alignment: .top, spacing: RKWSpacing.md) {
-                metric(controller.bpm > 0 ? "\(Int(controller.bpm))" : "--", "bpm",
-                       tint: controller.bpm > 0 ? RKW.danger : RKW.textMuted)
-                metric("\(Int(controller.kcal))", "kcal")
+            // Dropped in Always-On. BPM changes constantly and the screen only
+            // refreshes about once a minute, so a stale number here is worse than
+            // no number — and kcal is nobody's mid-run glance.
+            if !dimmed {
+                HStack(alignment: .top, spacing: RKWSpacing.md) {
+                    metric(controller.bpm > 0 ? "\(Int(controller.bpm))" : "--", "bpm",
+                           tint: controller.bpm > 0 ? RKW.danger : RKW.textMuted)
+                    metric("\(Int(controller.kcal))", "kcal")
+                }
+            }
+            if dimmed, controller.phase == .paused {
+                Text(controller.autoPaused ? "AUTO-PAUSED" : "PAUSED")
+                    .font(RKWFont.label)
+                    .foregroundStyle(RKW.accent)
             }
             Spacer(minLength: 0)
         }
@@ -160,10 +179,25 @@ struct WatchSessionView: View {
         .padding(.horizontal, RKWSpacing.sm)
     }
 
+    /// While running, the clock is handed to the system via `Text(timerInterval:)`
+    /// so it keeps ticking in Always-On, where our own 1 Hz timer is throttled to
+    /// roughly one refresh a minute. Paused, it's a frozen value — and a system
+    /// timer would carry on counting, which is exactly the wrong thing.
+    @ViewBuilder
+    private var elapsedLabel: some View {
+        if controller.phase == .running, let start = controller.effectiveStart {
+            Text(timerInterval: start...Date.distantFuture, countsDown: false)
+        } else {
+            Text(timeString(controller.elapsed))
+        }
+    }
+
     private func metric(_ value: String, _ label: String, tint: Color = RKW.textPrimary) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(value)
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                // Bigger when dimmed: fewer metrics are on screen, and this is the
+                // reading taken at arm's length with the wrist still down.
+                .font(.system(size: dimmed ? 26 : 20, weight: .semibold, design: .rounded))
                 .foregroundStyle(tint)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
