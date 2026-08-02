@@ -7,6 +7,10 @@ import SwiftUI
 /// lives on the second page for the same reason.
 struct WatchSessionView: View {
     let item: WatchMenu.Item
+    /// Defaults false so the recovery path, which re-presents without knowing, can
+    /// construct it — the controller has already restored its own indoor state by
+    /// then and `start` is not called again.
+    var indoor = false
     @Environment(\.dismiss) private var dismiss
     /// `.inactive` is Always-On: the wrist is down, the screen is dimmed and
     /// refreshing about once a minute. Not "the app is backgrounded" — the run is
@@ -50,7 +54,7 @@ struct WatchSessionView: View {
             // hasn't been read. A previous failure *should* retry.
             switch controller.phase {
             case .running, .paused, .ending, .saved: break
-            case .idle, .failed:                     controller.start(item)
+            case .idle, .failed:                     controller.start(item, indoor: indoor)
             }
         }
     }
@@ -113,8 +117,18 @@ struct WatchSessionView: View {
                 if s.cadence > 0 || s.elevationGain > 0 {
                     HStack(alignment: .top, spacing: RKWSpacing.md) {
                         metric(s.cadence > 0 ? "\(Int(s.cadence))" : "--", "cadence")
-                        metric(unit.elevationString(s.elevationGain), "climb")
+                        // Skipped indoors rather than reported as "0 m" — there was
+                        // no altitude to measure, which is different from flat.
+                        if s.elevationGain > 0 {
+                            metric(unit.elevationString(s.elevationGain), "climb")
+                        }
                     }
+                }
+                if controller.isIndoor {
+                    Text("Indoor — distance estimated from wrist motion.")
+                        .font(RKWFont.caption)
+                        .foregroundStyle(RKW.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Text(syncNote)
@@ -304,7 +318,11 @@ struct WatchSessionView: View {
             VStack(alignment: .leading, spacing: RKWSpacing.md) {
                 HStack(spacing: RKWSpacing.md) {
                     metric(cadenceText, "cadence")
-                    metric(unit.elevationString(controller.elevationGain), "climb")
+                    // Climb comes from GPS altitude, so indoors there is none to
+                    // report. A treadmill incline isn't something the watch can see.
+                    if !controller.isIndoor {
+                        metric(unit.elevationString(controller.elevationGain), "climb")
+                    }
                 }
                 Divider().overlay(RKW.surfaceElevated)
                 ForEach(Array(controller.splits.enumerated().reversed()), id: \.offset) { index, seconds in

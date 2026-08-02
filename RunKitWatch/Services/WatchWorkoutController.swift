@@ -152,6 +152,9 @@ final class WatchWorkoutController: NSObject {
     private var lastSplitElapsed: TimeInterval = 0
     private var elevationRef: Double?
     private var totalSteps = 0
+    private(set) var isIndoor = false
+    /// Rolling (elapsed, metres) samples, for pace when there's no GPS speed.
+    private var paceTrail: [(t: TimeInterval, d: Double)] = []
     private var autoPause = AutoPauseDetector.forActivity(.run)
     private var latestSpeed: Double = 0
 
@@ -196,7 +199,7 @@ final class WatchWorkoutController: NSObject {
 
     // MARK: - Start
 
-    func start(_ item: WatchMenu.Item) {
+    func start(_ item: WatchMenu.Item, indoor: Bool = false) {
         // Anything but a live session may start a new one — including after a
         // failure, which otherwise locks the app out of recording until relaunch.
         guard phase != .running, phase != .paused, phase != .ending,
@@ -206,10 +209,14 @@ final class WatchWorkoutController: NSObject {
         segments = item.segments.isEmpty ? ActivitySegment.starter : item.segments
 
         let activity = item.activity
+        isIndoor = indoor
         autoPause = AutoPauseDetector.forActivity(activity)
         let config = HKWorkoutConfiguration()
         config.activityType = Self.hkActivity(activity)
-        config.locationType = .outdoor
+        // Not just cosmetic: watchOS uses this to pick its distance model, taking
+        // the wrist-motion estimate indoors instead of waiting on GPS, and it's what
+        // makes Health label the result "Indoor Run".
+        config.locationType = indoor ? .indoor : .outdoor
 
         do {
             let s = try HKWorkoutSession(healthStore: healthStore, configuration: config)
@@ -232,7 +239,10 @@ final class WatchWorkoutController: NSObject {
             return
         }
 
-        startLocation()
+        // No GPS indoors. It would never get a fix worth having, and leaving the
+        // receiver on for an hour on a treadmill is a straight battery cost for a
+        // route that would wander around the car park.
+        if !indoor { startLocation() }
         phase = .running
         startIntervalsIfNeeded()
         WatchStore.shared.announceRecording(true, label: activity.rawValue)
@@ -249,6 +259,7 @@ final class WatchWorkoutController: NSObject {
         markedUnits = 0; summary = nil; autoPaused = false
         cadence = 0; elevationGain = 0; splits = []
         lastSplitElapsed = 0; elevationRef = nil; totalSteps = 0
+        isIndoor = false; paceTrail = []
         autoPause.reset()
         maxBpm = 0; bpmSum = 0; bpmSamples = 0
         zoneSeconds = [Double](repeating: 0, count: 5)
@@ -296,6 +307,11 @@ final class WatchWorkoutController: NSObject {
     /// traffic light doesn't produce two different average paces.
     @MainActor
     private func updateAutoPause() {
+        // Never indoors. Speed there is derived from wrist-estimated distance, which
+        // is far too coarse to tell "standing on the belt" from "running slowly" —
+        // and with no GPS at all, `latestSpeed` would sit at 0 and pause the entire
+        // run twenty metres in.
+        guard !isIndoor else { return }
         guard phase == .running || (phase == .paused && autoPaused) else { return }
         // Not until the run is genuinely under way. Speed reads 0 until the first
         // GPS fix lands, which would otherwise auto-pause every run about five
@@ -354,7 +370,17 @@ final class WatchWorkoutController: NSObject {
         guard phase == .running else { return }
         elapsed = Date().timeIntervalSince(start) - pausedTotal
 
-        if elapsed - lastPaceUpdate >= 3 {
+        // Indoors there is no GPS speed, so pace comes from how far the wrist
+        // estimate says we've moved over a trailing window. Twenty seconds rather
+        // than the GPS path's three: motion-derived distance advances in coarse
+        // jumps, and a short window turns those into a pace that swings wildly.
+        if isIndoor {
+            paceTrail.append((elapsed, distanceMeters))
+            paceTrail.removeAll { elapsed - $0.t > 20 }
+            if let first = paceTrail.first, elapsed - first.t >= 5 {
+                speedMps = max(0, (distanceMeters - first.d) / (elapsed - first.t))
+            }
+        } else if elapsed - lastPaceUpdate >= 3 {
             speedMps = latestSpeed
             lastPaceUpdate = elapsed
         }
@@ -569,6 +595,7 @@ final class WatchWorkoutController: NSObject {
         payload.activeEnergyKcal = kcal
         payload.usedGPS = usedGPS
         payload.steps = totalSteps
+        payload.isIndoor = isIndoor
         payload.avgHeartRateBpm = averageBpm()
         payload.maxHeartRateBpm = maxBpm
         payload.hrZoneSeconds = zoneSeconds
@@ -635,6 +662,7 @@ final class WatchWorkoutController: NSObject {
         s.maxBpm = maxBpm
         s.elevationGain = elevationGain
         s.usedGPS = usedGPS
+        s.isIndoor = isIndoor
         return s
     }
 
@@ -699,10 +727,11 @@ final class WatchWorkoutController: NSObject {
         maxBpm = state.maxBpm
         elevationGain = state.elevationGain
         usedGPS = state.usedGPS
+        isIndoor = state.isIndoor
         elapsed = Date().timeIntervalSince(state.startedAt) - state.pausedTotal
         autoPause = AutoPauseDetector.forActivity(state.item.activity)
 
-        startLocation()
+        if !isIndoor { startLocation() }
         phase = state.pausedAt == nil ? .running : .paused
         wasRecovered = true
         startTicker()

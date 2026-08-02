@@ -218,6 +218,7 @@ extension WatchBridge {
         s.activeEnergyKcal = payload.activeEnergyKcal
         s.usedGPS = payload.usedGPS
         s.steps = payload.steps
+        s.isIndoor = payload.isIndoor
         s.avgHeartRateBpm = payload.avgHeartRateBpm
         s.maxHeartRateBpm = payload.maxHeartRateBpm
         s.hrZoneSecondsJSON = HeartRateZones.encode(payload.hrZoneSeconds)

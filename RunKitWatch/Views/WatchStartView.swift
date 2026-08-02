@@ -9,12 +9,16 @@ struct WatchStartView: View {
     let item: WatchMenu.Item
     let unit: UnitSystem
     @State private var owner = RecordingOwner.shared
+    /// Remembered between runs — someone who trains on a treadmill tends to keep
+    /// doing it, and re-toggling before every session gets old.
+    @AppStorage("watchIndoor") private var indoor = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: RKWSpacing.lg) {
                 header
                 if item.segments.count > 1 { cardList }
+                indoorToggle
                 if owner.isRemoteRecording { phoneRecordingWarning }
                 startButton
             }
@@ -77,9 +81,24 @@ struct WatchStartView: View {
         .background(RKW.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
+    /// Indoor turns GPS off and hands distance to the watch's wrist-motion model.
+    private var indoorToggle: some View {
+        Toggle(isOn: $indoor) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Indoor")
+                    .font(RKWFont.body)
+                    .foregroundStyle(RKW.textPrimary)
+                Text(indoor ? "No GPS · wrist distance" : "GPS · route recorded")
+                    .font(RKWFont.caption)
+                    .foregroundStyle(RKW.textMuted)
+            }
+        }
+        .tint(RKW.accent)
+    }
+
     private var startButton: some View {
         NavigationLink {
-            WatchSessionView(item: item)
+            WatchSessionView(item: item, indoor: indoor)
         } label: {
             Label("Start", systemImage: "play.fill")
         }

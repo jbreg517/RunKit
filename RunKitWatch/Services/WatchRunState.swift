@@ -36,6 +36,7 @@ struct WatchRunState: Codable {
     var maxBpm: Double = 0
     var elevationGain: Double = 0
     var usedGPS = false
+    var isIndoor = false
 
     // MARK: Persistence
 
@@ -85,5 +86,6 @@ struct WatchRunState: Codable {
         maxBpm = try c.decodeIfPresent(Double.self, forKey: .maxBpm) ?? 0
         elevationGain = try c.decodeIfPresent(Double.self, forKey: .elevationGain) ?? 0
         usedGPS = try c.decodeIfPresent(Bool.self, forKey: .usedGPS) ?? false
+        isIndoor = try c.decodeIfPresent(Bool.self, forKey: .isIndoor) ?? false
     }
 }

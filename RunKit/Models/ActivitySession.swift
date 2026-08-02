@@ -17,6 +17,13 @@ final class ActivitySession {
     var flights: Int = 0
     var activeEnergyKcal: Double = 0
     var usedGPS: Bool = false
+    /// Treadmill, track, stationary bike. A property of the *session*, not of the
+    /// saved workout — the same 5K is run outside one day and on a treadmill the
+    /// next, and storing it on the template would be wrong on one of those days.
+    ///
+    /// Drives `HKMetadataKeyIndoorWorkout`, which is what makes Apple Health label
+    /// it "Indoor Run" rather than quietly filing a treadmill run as an outdoor one.
+    var isIndoor: Bool = false
     var manualDistance: Bool = false
     /// True when some of `distanceMeters` came from a fallback (pedometer fill or
     /// a straight-line GPS-gap bridge) rather than a clean GPS track.

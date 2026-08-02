@@ -140,13 +140,24 @@ final class HealthService {
 
         let config = HKWorkoutConfiguration()
         config.activityType = activityType(for: session.type)
-        config.locationType = session.usedGPS ? .outdoor : .unknown
+        // `.unknown` only when we genuinely don't know. An indoor session is a
+        // positive fact, not an absence of GPS.
+        config.locationType = session.isIndoor ? .indoor
+                                               : (session.usedGPS ? .outdoor : .unknown)
 
         let end = session.endedAt ?? Date()
         let builder = HKWorkoutBuilder(healthStore: store, configuration: config, device: .local())
 
         do {
             try await builder.beginCollection(at: session.startedAt)
+
+            // The metadata key, not just the location type, is what makes Apple
+            // Health and Fitness display "Indoor Run". Without it a treadmill run is
+            // filed as an ordinary one and its pace gets compared against outdoor
+            // efforts it has nothing to do with.
+            if session.isIndoor {
+                try await addMetadata([HKMetadataKeyIndoorWorkout: true], to: builder)
+            }
 
             var samples: [HKSample] = []
             if session.activeEnergyKcal > 0,
@@ -174,6 +185,16 @@ final class HealthService {
             await attachRoute(from: session, to: workout)
         } catch {
             // On-device only; nothing user-facing in v1.
+        }
+    }
+
+    /// `addMetadata` has no async bridge either.
+    private func addMetadata(_ metadata: [String: Any], to builder: HKWorkoutBuilder) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            builder.addMetadata(metadata) { _, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
         }
     }
 

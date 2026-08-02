@@ -38,6 +38,12 @@ struct ActivitySessionView: View {
     @State private var motion = MotionService.shared
     @State private var liveHR = LiveHeartRateService.shared
     @State private var owner = RecordingOwner.shared
+    /// Not persisted to `@AppStorage`: where you run changes run to run, and a
+    /// treadmill session on Tuesday shouldn't silently make Saturday's park run
+    /// indoor too.
+    @State private var indoor = false
+    /// Rolling (elapsed, metres) samples for pace when there's no GPS speed to read.
+    @State private var paceTrail: [(t: TimeInterval, d: Double)] = []
     /// Pedometer reading when the session began, so we can measure the delta.
     @State private var motionStartMeters: Double = 0
 
@@ -135,10 +141,16 @@ struct ActivitySessionView: View {
     private var distanceSegments: [ActivitySegment] { segments.filter(\.endsOnDistance) }
     private var needsDistance: Bool { !distanceSegments.isEmpty }
 
-    /// A ride measures distance only by GPS, so a distance card on a ride with GPS
-    /// off could never complete. Walk/run still work via the pedometer.
+    /// Whether this run will actually use GPS — the stored preference, unless we're
+    /// indoors, where it's never used regardless.
+    private var willUseGPS: Bool { gpsEnabled && !indoor }
+
+    /// A ride measures distance only by GPS, so a distance card on a ride without it
+    /// could never complete — which now includes every indoor ride, since a
+    /// stationary bike gives the wrist nothing to count. Walk/run still work via the
+    /// pedometer.
     private var distanceUnavailable: Bool {
-        !gpsEnabled && distanceSegments.contains { !$0.activity.pedometerDistance }
+        !willUseGPS && distanceSegments.contains { !$0.activity.pedometerDistance }
     }
 
     // MARK: - Body
@@ -221,9 +233,18 @@ struct ActivitySessionView: View {
     }
 
     private var gpsRow: some View {
-        Toggle("Use GPS (route + distance)", isOn: $gpsEnabled)
-            .tint(RKColor.accent)
-            .padding(.horizontal, RKSpacing.md)
+        VStack(alignment: .leading, spacing: RKSpacing.sm) {
+            Toggle("Indoor (treadmill, track, bike)", isOn: $indoor)
+                .tint(RKColor.accent)
+            // GPS is meaningless indoors — it burns battery for a route that
+            // wanders in a car park somewhere. Hidden rather than forced off, so
+            // the user's outdoor preference survives an indoor run.
+            if !indoor {
+                Toggle("Use GPS (route + distance)", isOn: $gpsEnabled)
+                    .tint(RKColor.accent)
+            }
+        }
+        .padding(.horizontal, RKSpacing.md)
     }
 
     /// Library entry point. A single row, so the setup stays about the cards.
@@ -289,9 +310,13 @@ struct ActivitySessionView: View {
             warning("Your Apple Watch is already recording \(label.lowercased()). Starting here too will save the same run twice to Apple Health and double the calories. End it on your watch first.")
         }
         if distanceUnavailable {
-            warning("A ride has no way to measure distance without GPS, so a distance card would never finish. Turn GPS on, or give that card a time goal.")
-        } else if needsDistance && !gpsEnabled {
-            warning("GPS is off — distance comes from your step counter, so it's an estimate and there'll be no route map.")
+            warning(indoor
+                ? "A stationary bike gives your phone nothing to measure, so a distance card would never finish. Give that card a time goal instead."
+                : "A ride has no way to measure distance without GPS, so a distance card would never finish. Turn GPS on, or give that card a time goal.")
+        } else if needsDistance && !willUseGPS {
+            warning(indoor
+                ? "Indoors, distance comes from your step counter — expect it to differ a little from the treadmill's own reading."
+                : "GPS is off — distance comes from your step counter, so it's an estimate and there'll be no route map.")
         }
         if segments.contains(where: { $0.goal == .heartRate }) {
             warning("A heart-rate card needs live heart rate. Run it on your Apple Watch for zone nudges — recorded here it still runs, it just won't nudge.")
@@ -694,7 +719,9 @@ struct ActivitySessionView: View {
 
     private func beginActiveSession() {
         let s = ActivitySession(type: sessionActivity)
-        s.usedGPS = gpsEnabled
+        s.isIndoor = indoor
+        // Indoors GPS is never used, whatever the stored preference says.
+        s.usedGPS = gpsEnabled && !indoor
         s.workoutTypeRaw = workoutType.rawValue
         snapshotSetup(into: s)
 
@@ -712,13 +739,14 @@ struct ActivitySessionView: View {
         // configured and started a session the reading is already live.
         motionStartMeters = motion.distanceMeters
         displayedSpeedMps = 0
+        paceTrail = []
         lastPaceUpdate = 0
         announcedUnits = 0
         goalAnnounced = false
         lastNudge = 0
         resetSegmentEngine()
 
-        if gpsEnabled { startLocation(for: s) }
+        if s.usedGPS { startLocation(for: s) }
         if segments.contains(where: { $0.goal == .heartRate }) {
             liveHR.start()
             Task { await loadZones() }
@@ -823,7 +851,7 @@ struct ActivitySessionView: View {
         elapsed = Date().timeIntervalSince(start) - pausedTotal
 
         if elapsed - lastPaceUpdate >= 3 {
-            displayedSpeedMps = location.currentSpeedMps
+            displayedSpeedMps = usingGPS ? location.currentSpeedMps : pedometerSpeed()
             lastPaceUpdate = elapsed
         }
 
@@ -1075,6 +1103,24 @@ struct ActivitySessionView: View {
         }
         autoPause.reset()
         pushLiveActivity()
+    }
+
+    private var usingGPS: Bool { session?.usedGPS == true }
+
+    /// Pace without GPS, from how far the pedometer says we've come over a trailing
+    /// window. Previously this read `location.currentSpeedMps`, which is zero when
+    /// GPS is off — so every treadmill run showed a pace of "--" for its whole
+    /// duration while happily counting distance.
+    ///
+    /// Twenty seconds, not the GPS path's three: step-derived distance updates in
+    /// coarse jumps, and a short window turns those into a pace that swings wildly.
+    private func pedometerSpeed() -> Double {
+        paceTrail.append((elapsed, sessionMeters))
+        paceTrail.removeAll { elapsed - $0.t > 20 }
+        guard let first = paceTrail.first else { return 0 }
+        let dt = elapsed - first.t
+        guard dt >= 5 else { return 0 }
+        return max(0, (sessionMeters - first.d) / dt)
     }
 
     /// Auto-pause. Only with GPS — the pedometer's distance is far too coarse to

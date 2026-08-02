@@ -48,6 +48,9 @@ struct WatchSessionPayload: Codable, Hashable {
     var distanceMeters: Double = 0
     var activeEnergyKcal: Double = 0
     var usedGPS: Bool = false
+    /// Treadmill, track or stationary bike — drives HKMetadataKeyIndoorWorkout and
+    /// keeps the phone from filing a treadmill run alongside outdoor efforts.
+    var isIndoor: Bool = false
     /// Steps over the workout. Carried so `StatsCalculator.averageCadence` works for
     /// wrist-recorded runs — it reads `ActivitySession.steps`, and without this a
     /// watch run would silently drop out of the cadence average.
@@ -84,6 +87,7 @@ struct WatchSessionPayload: Codable, Hashable {
         activeEnergyKcal = try c.decodeIfPresent(Double.self, forKey: .activeEnergyKcal) ?? 0
         usedGPS = try c.decodeIfPresent(Bool.self, forKey: .usedGPS) ?? false
         steps = try c.decodeIfPresent(Int.self, forKey: .steps) ?? 0
+        isIndoor = try c.decodeIfPresent(Bool.self, forKey: .isIndoor) ?? false
         avgHeartRateBpm = try c.decodeIfPresent(Double.self, forKey: .avgHeartRateBpm) ?? 0
         maxHeartRateBpm = try c.decodeIfPresent(Double.self, forKey: .maxHeartRateBpm) ?? 0
         let zones = try c.decodeIfPresent([Double].self, forKey: .hrZoneSeconds) ?? []

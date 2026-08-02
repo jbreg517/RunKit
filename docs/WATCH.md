@@ -196,6 +196,23 @@ between fixes — is discarded entirely.
 in contact, so it states the conflict rather than blocking. A block that depended on
 connectivity would strand the exact user the watch app exists for.
 
+**Indoor is a property of the session, not the workout.** The same 5K is run outside
+one day and on a treadmill the next; storing it on the template would be wrong on one
+of those days. It drives `HKMetadataKeyIndoorWorkout` — without that key a treadmill
+run is filed as an ordinary one, and its pace gets compared against outdoor efforts it
+has nothing to do with.
+
+**Auto-pause must be off indoors.** This was a live bug, not a hypothetical: with no
+GPS, `latestSpeed` sits at 0, and auto-pause would have stopped the whole run twenty
+metres in. Indoor speed comes from wrist-estimated distance instead, which is far too
+coarse to tell "standing on the belt" from "running slowly".
+
+**Pace indoors needs a longer window.** Motion-derived distance advances in coarse
+jumps, so the GPS path's 3-second smoothing turns them into a pace that swings wildly.
+Twenty seconds. The phone had the same bug in reverse — with GPS off it read
+`location.currentSpeedMps`, which is always zero, so every treadmill run showed "--"
+for its whole duration while happily counting distance.
+
 **Crash recovery needs both halves.** `recoverActiveWorkoutSession` returns the live
 session with distance, HR and energy intact, but everything RunKit layers on top —
 card position, interval rep, zone buckets, splits — dies with the process. That's
