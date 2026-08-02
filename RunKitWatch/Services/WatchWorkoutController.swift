@@ -31,6 +31,8 @@ final class WatchWorkoutController: NSObject {
         var kcal: Double = 0
         var avgBpm: Double = 0
         var maxBpm: Double = 0
+        var cadence: Double = 0
+        var elevationGain: Double = 0
     }
 
     // MARK: Published state
@@ -57,6 +59,14 @@ final class WatchWorkoutController: NSObject {
     private(set) var kcal: Double = 0
     /// Smoothed every 3s, so pace doesn't flicker on GPS jitter.
     private(set) var speedMps: Double = 0
+    /// Steps per minute, straight off the live builder. Zero until enough samples
+    /// land, which on a wrist is a few seconds in.
+    private(set) var cadence: Double = 0
+    /// Cumulative climb in metres. Rises only — descent isn't subtracted, because
+    /// "elevation gain" means the up.
+    private(set) var elevationGain: Double = 0
+    /// Completed km/mi splits, oldest first, in seconds each.
+    private(set) var splits: [TimeInterval] = []
 
     private(set) var segments: [ActivitySegment] = []
     private(set) var segIndex = 0
@@ -130,6 +140,9 @@ final class WatchWorkoutController: NSObject {
     private var lastPaceUpdate: TimeInterval = 0
     /// Whole km/mi marks already signalled, so each split buzzes exactly once.
     private var markedUnits = 0
+    private var lastSplitElapsed: TimeInterval = 0
+    private var elevationRef: Double?
+    private var totalSteps = 0
     private var autoPause = AutoPauseDetector.forActivity(.run)
     private var latestSpeed: Double = 0
 
@@ -166,7 +179,8 @@ final class WatchWorkoutController: NSObject {
             HKQuantityType(.heartRate),
             HKQuantityType(.activeEnergyBurned),
             HKQuantityType(.distanceWalkingRunning),
-            HKQuantityType(.distanceCycling)
+            HKQuantityType(.distanceCycling),
+            HKQuantityType(.stepCount)      // cadence
         ]
         try? await healthStore.requestAuthorization(toShare: share, read: read)
     }
@@ -223,6 +237,8 @@ final class WatchWorkoutController: NSObject {
         segStartElapsed = 0; segStartMeters = 0; phaseEndsAt = 0
         intervalsDone = false; lastNudge = 0; lastPaceUpdate = 0; latestSpeed = 0
         markedUnits = 0; summary = nil; autoPaused = false
+        cadence = 0; elevationGain = 0; splits = []
+        lastSplitElapsed = 0; elevationRef = nil; totalSteps = 0
         autoPause.reset()
         maxBpm = 0; bpmSum = 0; bpmSamples = 0
         zoneSeconds = [Double](repeating: 0, count: 5)
@@ -337,7 +353,13 @@ final class WatchWorkoutController: NSObject {
         if distanceMeters > 0 {
             let units = Int(distanceMeters / unit.metersPerUnit)
             if units > markedUnits {
+                // A single tick can cross more than one mark on a bike, so record a
+                // split per unit crossed rather than assuming one.
+                let crossed = units - markedUnits
+                let each = (elapsed - lastSplitElapsed) / Double(crossed)
+                for _ in 0..<crossed { splits.append(each) }
                 markedUnits = units
+                lastSplitElapsed = elapsed
                 WKInterfaceDevice.current().play(.click)
             }
         }
@@ -527,6 +549,7 @@ final class WatchWorkoutController: NSObject {
         payload.distanceMeters = distanceMeters
         payload.activeEnergyKcal = kcal
         payload.usedGPS = usedGPS
+        payload.steps = totalSteps
         payload.avgHeartRateBpm = averageBpm()
         payload.maxHeartRateBpm = maxBpm
         payload.hrZoneSeconds = zoneSeconds
@@ -544,7 +567,9 @@ final class WatchWorkoutController: NSObject {
                           meters: distanceMeters,
                           kcal: kcal,
                           avgBpm: payload.avgHeartRateBpm,
-                          maxBpm: maxBpm)
+                          maxBpm: maxBpm,
+                          cadence: cadence,
+                          elevationGain: elevationGain)
         phase = .saved
     }
 
@@ -628,6 +653,16 @@ extension WatchWorkoutController: HKLiveWorkoutBuilderDelegate {
                     || id == HKQuantityTypeIdentifier.distanceCycling.rawValue {
             let value = stats.sumQuantity()?.doubleValue(for: .meter()) ?? 0
             DispatchQueue.main.async { self.distanceMeters = value }
+        } else if id == HKQuantityTypeIdentifier.stepCount.rawValue {
+            // Cadence from the workout's own step total rather than a separate
+            // query: it already excludes paused time, which is what makes the
+            // number mean anything.
+            let steps = stats.sumQuantity()?.doubleValue(for: .count()) ?? 0
+            DispatchQueue.main.async {
+                self.totalSteps = Int(steps)
+                let minutes = self.elapsed / 60
+                self.cadence = minutes > 0.5 ? steps / minutes : 0
+            }
         }
     }
 }
@@ -647,6 +682,7 @@ extension WatchWorkoutController: CLLocationManagerDelegate {
             // stop and auto-pause a run that's going fine, so keep the last known
             // value instead.
             if let speed = usable.last?.speed, speed >= 0 { self.latestSpeed = speed }
+            self.accumulateElevation(usable)
             self.pendingLocations.append(contentsOf: usable)
             self.route.append(contentsOf: usable.map {
                 WatchSessionPayload.Point(t: $0.timestamp,
@@ -656,6 +692,34 @@ extension WatchWorkoutController: CLLocationManagerDelegate {
                                           acc: $0.horizontalAccuracy,
                                           spd: max(0, $0.speed))
             })
+        }
+    }
+
+    /// GPS altitude is noisy — a stationary receiver wanders a metre or two, so
+    /// summing every positive step would report a hundred metres of climb on a flat
+    /// track.
+    ///
+    /// Measured against a **moving reference** rather than the previous fix. A
+    /// gradual hill rises far less than the noise floor between one fix and the
+    /// next, so a per-fix threshold would discard the entire climb; holding a
+    /// reference until the change clears the threshold accumulates it correctly and
+    /// still rejects jitter. Descending re-anchors without subtracting, because
+    /// "elevation gain" means the up.
+    private func accumulateElevation(_ locations: [CLLocation]) {
+        let threshold = 3.0
+        for loc in locations {
+            guard loc.verticalAccuracy > 0, loc.verticalAccuracy < 10 else { continue }
+            guard let reference = elevationRef else {
+                elevationRef = loc.altitude
+                continue
+            }
+            let delta = loc.altitude - reference
+            if delta > threshold {
+                elevationGain += delta
+                elevationRef = loc.altitude
+            } else if delta < -threshold {
+                elevationRef = loc.altitude
+            }
         }
     }
 

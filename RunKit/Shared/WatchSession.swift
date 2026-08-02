@@ -48,6 +48,10 @@ struct WatchSessionPayload: Codable, Hashable {
     var distanceMeters: Double = 0
     var activeEnergyKcal: Double = 0
     var usedGPS: Bool = false
+    /// Steps over the workout. Carried so `StatsCalculator.averageCadence` works for
+    /// wrist-recorded runs — it reads `ActivitySession.steps`, and without this a
+    /// watch run would silently drop out of the cadence average.
+    var steps: Int = 0
     var avgHeartRateBpm: Double = 0
     var maxHeartRateBpm: Double = 0
     /// Seconds in each of the five zones, computed on the watch from live samples —
@@ -79,6 +83,7 @@ struct WatchSessionPayload: Codable, Hashable {
         distanceMeters = try c.decodeIfPresent(Double.self, forKey: .distanceMeters) ?? 0
         activeEnergyKcal = try c.decodeIfPresent(Double.self, forKey: .activeEnergyKcal) ?? 0
         usedGPS = try c.decodeIfPresent(Bool.self, forKey: .usedGPS) ?? false
+        steps = try c.decodeIfPresent(Int.self, forKey: .steps) ?? 0
         avgHeartRateBpm = try c.decodeIfPresent(Double.self, forKey: .avgHeartRateBpm) ?? 0
         maxHeartRateBpm = try c.decodeIfPresent(Double.self, forKey: .maxHeartRateBpm) ?? 0
         let zones = try c.decodeIfPresent([Double].self, forKey: .hrZoneSeconds) ?? []

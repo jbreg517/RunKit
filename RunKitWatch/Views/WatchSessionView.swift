@@ -31,7 +31,12 @@ struct WatchSessionView: View {
             } else {
                 TabView(selection: $page) {
                     metricsPage.tag(0)
-                    controlsPage.tag(1)
+                    // Only once there's something to show. An empty page you can
+                    // swipe to is worse than a page that appears when it's earned.
+                    if !controller.splits.isEmpty {
+                        splitsPage.tag(1)
+                    }
+                    controlsPage.tag(2)
                 }
                 .tabViewStyle(.page)
             }
@@ -104,6 +109,12 @@ struct WatchSessionView: View {
                     metric(s.avgBpm > 0 ? "\(Int(s.avgBpm))" : "--", "avg bpm",
                            tint: s.avgBpm > 0 ? RKW.danger : RKW.textMuted)
                     metric("\(Int(s.kcal))", "kcal")
+                }
+                if s.cadence > 0 || s.elevationGain > 0 {
+                    HStack(alignment: .top, spacing: RKWSpacing.md) {
+                        metric(s.cadence > 0 ? "\(Int(s.cadence))" : "--", "cadence")
+                        metric(unit.elevationString(s.elevationGain), "climb")
+                    }
                 }
 
                 Text(syncNote)
@@ -282,6 +293,44 @@ struct WatchSessionView: View {
         case .heartRate: return "ZONE \(seg.hrZone)\(position)"
         case .intervals: return nil
         }
+    }
+
+    // MARK: Splits
+
+    /// Newest first — the split you just ran is the one you want, and scrolling to
+    /// the bottom of a list mid-run is not a thing anyone will do.
+    private var splitsPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: RKWSpacing.md) {
+                HStack(spacing: RKWSpacing.md) {
+                    metric(cadenceText, "cadence")
+                    metric(unit.elevationString(controller.elevationGain), "climb")
+                }
+                Divider().overlay(RKW.surfaceElevated)
+                ForEach(Array(controller.splits.enumerated().reversed()), id: \.offset) { index, seconds in
+                    HStack {
+                        Text("\(index + 1)")
+                            .font(RKWFont.caption)
+                            .foregroundStyle(RKW.textMuted)
+                            .frame(width: 18, alignment: .leading)
+                        Text(timeString(seconds))
+                            .font(RKWFont.bodyBold)
+                            .monospacedDigit()
+                            .foregroundStyle(index == controller.splits.count - 1
+                                             ? RKW.accent : RKW.textPrimary)
+                        Spacer()
+                        Text(unit.distanceUnit)
+                            .font(RKWFont.caption)
+                            .foregroundStyle(RKW.textMuted)
+                    }
+                }
+            }
+            .padding(.horizontal, RKWSpacing.sm)
+        }
+    }
+
+    private var cadenceText: String {
+        controller.cadence > 0 ? "\(Int(controller.cadence))" : "--"
     }
 
     // MARK: Controls
