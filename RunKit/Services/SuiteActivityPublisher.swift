@@ -68,7 +68,13 @@ enum SuiteActivityPublisher {
                                   load: min(1, total / reference),
                                   perceivedEffort: 0,   // RunKit never asks for RPE
                                   sessionCount: daySessions.count,
-                                  activeKcal: kcal)
+                                  activeKcal: kcal,
+                                  activeMinutes: daySessions.reduce(0) { $0 + $1.activeSeconds / 60 },
+                                  // Session-RPE load stays 0: RunKit collects no RPE, and
+                                  // substituting TRIMP would put a different unit in a
+                                  // field readers sum across apps. See LiftKit's
+                                  // docs/TRAINING-LOAD.md.
+                                  sessionLoad: 0)
         }
         .sorted { $0.date < $1.date }
     }

@@ -73,15 +73,35 @@ struct SuiteDailyLoad: Codable, Equatable {
     /// off** (the App-Group fallback in the precedence rule). When Health is on,
     /// HealthKit's own sum wins and this is ignored, so the two never double-count.
     var activeKcal: Double = 0
+    /// Total active minutes that day. Absolute, like `activeKcal`.
+    ///
+    /// Published even though HealthKit records workout duration, because reading it
+    /// from Health needs `HKObjectType.workoutType()` — a permission scope an app
+    /// shouldn't have to request just to draw a "minutes trained" row.
+    var activeMinutes: Double = 0
+    /// Session-RPE load in AU: the day's sessions, each `RPE × active minutes`, summed.
+    /// 0 when the producer has no effort rating for that day.
+    ///
+    /// **Summed per session by the producer, and summed again across producers by the
+    /// reader.** That is the only form that merges correctly — multiplying a merged
+    /// `perceivedEffort` by a merged `activeMinutes` would not give the same answer,
+    /// because effort maxes and minutes add.
+    ///
+    /// Distinct from `load`: this is an absolute figure on a scale shared by everyone,
+    /// where `load` is normalised against the individual's own recent norm.
+    var sessionLoad: Double = 0
 
     init(date: Date = Date(), kind: SuiteSessionKind = .rest, load: Double = 0,
-         perceivedEffort: Double = 0, sessionCount: Int = 0, activeKcal: Double = 0) {
+         perceivedEffort: Double = 0, sessionCount: Int = 0, activeKcal: Double = 0,
+         activeMinutes: Double = 0, sessionLoad: Double = 0) {
         self.date = date
         self.kind = kind
         self.load = load
         self.perceivedEffort = perceivedEffort
         self.sessionCount = sessionCount
         self.activeKcal = activeKcal
+        self.activeMinutes = activeMinutes
+        self.sessionLoad = sessionLoad
     }
 
     /// Every field optional on the wire — see the note on `SuiteProfile.init(from:)`.
@@ -93,6 +113,8 @@ struct SuiteDailyLoad: Codable, Equatable {
         perceivedEffort = try c.decodeIfPresent(Double.self, forKey: .perceivedEffort) ?? 0
         sessionCount    = try c.decodeIfPresent(Int.self, forKey: .sessionCount) ?? 0
         activeKcal      = try c.decodeIfPresent(Double.self, forKey: .activeKcal) ?? 0
+        activeMinutes   = try c.decodeIfPresent(Double.self, forKey: .activeMinutes) ?? 0
+        sessionLoad     = try c.decodeIfPresent(Double.self, forKey: .sessionLoad) ?? 0
     }
 }
 
@@ -237,7 +259,9 @@ enum SuiteActivityStore {
     /// behaviour only on a value, never on the absence of one.
     ///
     /// Loads add (a lift *and* a run is harder than either alone), capped at 1. The
-    /// highest RPE wins, because perceived effort doesn't sum.
+    /// highest RPE wins, because perceived effort doesn't sum — but `sessionLoad` does,
+    /// which is exactly why it's carried as its own field rather than recomputed from
+    /// the merged RPE and minutes.
     static func totalLoad(on date: Date, excluding own: SuiteSource) -> SuiteDailyLoad? {
         let day = Calendar.current.startOfDay(for: date)
         let entries = feeds(excluding: own)
@@ -251,6 +275,8 @@ enum SuiteActivityStore {
             merged.perceivedEffort = max(merged.perceivedEffort, entry.perceivedEffort)
             merged.sessionCount += entry.sessionCount
             merged.activeKcal += entry.activeKcal   // absolute kcal sums (FuelKit's Health-off fallback)
+            merged.activeMinutes += entry.activeMinutes
+            merged.sessionLoad += entry.sessionLoad
             if merged.kind == .rest { merged.kind = entry.kind }
         }
         return merged
