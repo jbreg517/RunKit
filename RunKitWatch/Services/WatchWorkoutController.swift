@@ -20,9 +20,23 @@ final class WatchWorkoutController: NSObject {
 
     enum Phase: Equatable { case idle, running, paused, ending, saved, failed(String) }
 
+    /// What the run came to. Held after `phase` becomes `.saved` so the summary
+    /// screen has something to show — the live properties are reset by the next
+    /// `start`, and a run that simply vanishes when you finish it is the single
+    /// most annoying thing a tracker can do.
+    struct Summary: Equatable {
+        var activity: ActivityType = .run
+        var seconds: TimeInterval = 0
+        var meters: Double = 0
+        var kcal: Double = 0
+        var avgBpm: Double = 0
+        var maxBpm: Double = 0
+    }
+
     // MARK: Published state
 
     private(set) var phase: Phase = .idle
+    private(set) var summary: Summary?
     /// Active seconds — paused time excluded, exactly like the phone.
     private(set) var elapsed: TimeInterval = 0
     private(set) var distanceMeters: Double = 0
@@ -61,6 +75,8 @@ final class WatchWorkoutController: NSObject {
     private var intervalsDone = false
     private var lastNudge: TimeInterval = 0
     private var lastPaceUpdate: TimeInterval = 0
+    /// Whole km/mi marks already signalled, so each split buzzes exactly once.
+    private var markedUnits = 0
     private var latestSpeed: Double = 0
 
     private var maxBpm: Double = 0
@@ -149,6 +165,7 @@ final class WatchWorkoutController: NSObject {
         segIndex = 0; segmentsDone = false; intRep = 1; intPhaseIsWork = true
         segStartElapsed = 0; segStartMeters = 0; phaseEndsAt = 0
         intervalsDone = false; lastNudge = 0; lastPaceUpdate = 0; latestSpeed = 0
+        markedUnits = 0; summary = nil
         maxBpm = 0; bpmSum = 0; bpmSamples = 0
         zoneSeconds = [Double](repeating: 0, count: 5)
         route = []; pendingLocations = []; usedGPS = false
@@ -210,6 +227,17 @@ final class WatchWorkoutController: NSObject {
         if elapsed - lastPaceUpdate >= 3 {
             speedMps = latestSpeed
             lastPaceUpdate = elapsed
+        }
+
+        // Split marks. The phone speaks these ("3 kilometres, 18 minutes"); on the
+        // wrist a distinct light tap is the equivalent — it reads at a glance with
+        // the metrics page already showing the numbers, and needs no headphones.
+        if distanceMeters > 0 {
+            let units = Int(distanceMeters / unit.metersPerUnit)
+            if units > markedUnits {
+                markedUnits = units
+                WKInterfaceDevice.current().play(.click)
+            }
         }
 
         // One second in whatever zone the wrist is reading right now. Sampling at a
@@ -408,7 +436,20 @@ final class WatchWorkoutController: NSObject {
         payload.route = route
 
         WatchStore.shared.send(payload)
+        summary = Summary(activity: payload.activity,
+                          seconds: elapsed,
+                          meters: distanceMeters,
+                          kcal: kcal,
+                          avgBpm: payload.avgHeartRateBpm,
+                          maxBpm: maxBpm)
         phase = .saved
+    }
+
+    /// Dismiss the summary and go back to idle. Separate from `deliver` so the
+    /// numbers survive until the user has actually looked at them.
+    func clearSummary() {
+        summary = nil
+        phase = .idle
     }
 
     /// Mean of the once-a-second readings. Sampled at a fixed rate while unpaused,

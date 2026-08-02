@@ -14,32 +14,118 @@ struct WatchSessionView: View {
     private var unit: UnitSystem { controller.unit }
 
     var body: some View {
-        TabView(selection: $page) {
-            metricsPage.tag(0)
-            controlsPage.tag(1)
+        Group {
+            if let summary = controller.summary {
+                summaryPage(summary)
+            } else if case let .failed(reason) = controller.phase {
+                failedPage(reason)
+            } else {
+                TabView(selection: $page) {
+                    metricsPage.tag(0)
+                    controlsPage.tag(1)
+                }
+                .tabViewStyle(.page)
+            }
         }
-        .tabViewStyle(.page)
         .navigationTitle(title)
         .navigationBarBackButtonHidden(true)
         .containerBackground(RKW.background, for: .navigation)
         .onAppear {
             // Guard against re-entry: navigating back and forward must not restart
-            // a run that's already going.
-            if controller.phase == .idle || controller.phase == .saved {
-                controller.start(item)
+            // a run that's already going, and must not blow away a summary that
+            // hasn't been read. A previous failure *should* retry.
+            switch controller.phase {
+            case .running, .paused, .ending, .saved: break
+            case .idle, .failed:                     controller.start(item)
             }
         }
-        .onChange(of: controller.phase) { _, new in
-            if new == .saved { dismiss() }
+    }
+
+    /// A workout that never started — no HealthKit, or the session was refused.
+    /// Shown plainly rather than leaving the metrics page sitting at zero, which
+    /// looks like a run that isn't counting.
+    private func failedPage(_ reason: String) -> some View {
+        VStack(spacing: RKWSpacing.md) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 24))
+                .foregroundStyle(RKW.danger)
+            Text("Couldn’t start")
+                .font(RKWFont.heading)
+                .foregroundStyle(RKW.textPrimary)
+            Text(reason)
+                .font(RKWFont.caption)
+                .foregroundStyle(RKW.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Back") { dismiss() }
+                .buttonStyle(RKWSecondaryButtonStyle())
         }
+        .padding(.horizontal, RKWSpacing.sm)
     }
 
     private var title: String {
         switch controller.phase {
         case .paused:  return "Paused"
         case .ending:  return "Saving…"
+        case .saved:   return "Done"
         default:       return item.activity.rawValue
         }
+    }
+
+    // MARK: Summary
+
+    /// Shown when the run is saved, instead of dropping straight back to the menu.
+    /// The numbers are already gone from the live properties by then, so this reads
+    /// the snapshot the controller kept.
+    private func summaryPage(_ s: WatchWorkoutController.Summary) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: RKWSpacing.md) {
+                Text(timeString(s.seconds))
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(RKW.accent)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+
+                HStack(alignment: .top, spacing: RKWSpacing.md) {
+                    metric(unit.distanceString(s.meters), "distance")
+                    metric(summaryPace(s), s.activity == .ride ? "avg speed" : "avg pace")
+                }
+                HStack(alignment: .top, spacing: RKWSpacing.md) {
+                    metric(s.avgBpm > 0 ? "\(Int(s.avgBpm))" : "--", "avg bpm",
+                           tint: s.avgBpm > 0 ? RKW.danger : RKW.textMuted)
+                    metric("\(Int(s.kcal))", "kcal")
+                }
+
+                Text(syncNote)
+                    .font(RKWFont.caption)
+                    .foregroundStyle(RKW.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button("Done") {
+                    controller.clearSummary()
+                    dismiss()
+                }
+                .buttonStyle(RKWPrimaryButtonStyle())
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, RKWSpacing.sm)
+            .padding(.bottom, RKWSpacing.lg)
+        }
+    }
+
+    /// Says where the run actually is, because "saved" on a wrist with no phone in
+    /// range is ambiguous — and the honest answer is that it's already safe.
+    private var syncNote: String {
+        "Saved to Apple Health. It’ll appear in RunKit next time your iPhone is near."
+    }
+
+    private func summaryPace(_ s: WatchWorkoutController.Summary) -> String {
+        guard s.meters > 0, s.seconds > 0 else { return "--" }
+        if s.activity == .ride {
+            return unit.speedString(seconds: s.seconds, meters: s.meters)
+        }
+        return unit.paceString(seconds: s.seconds, meters: s.meters)
     }
 
     // MARK: Metrics

@@ -165,4 +165,19 @@ overwriting a wrist-measured summary with a worse re-query.
 
 **Transfers are idempotent on `WatchSessionPayload.id`.** WatchConnectivity can
 deliver a queued file more than once; without the id check the same run lands twice.
-| later | The two-owner rule. Complications. Voice cues — the roadmap's open question is clip pack (bundle size, twice) vs system TTS; haptics carry v1 either way. |
+| v0.53 | Post-run summary, split marks, and a real failure screen. |
+| later | The two-owner rule. Always-On display. Crash/relaunch recovery. Complications. Voice cues — the roadmap's open question is clip pack (bundle size, twice) vs system TTS; haptics carry v1 either way. |
+
+## Phone independence
+
+Recording needs no phone. Nothing in the path calls `isReachable` or `sendMessage`;
+the only WatchConnectivity call is `transferFile`, which queues to disk and retries
+when the phone reappears. All six card goals run on-wrist across walk, run and ride.
+
+Two things *do* depend on a prior sync, and neither breaks a run:
+
+- **The workout library.** Start Run / Walk / Ride are generated locally and always
+  work. Prebuilt, saved and scheduled workouts arrive in the application context —
+  once synced they persist offline indefinitely.
+- **HR zone bounds.** Never synced means an HR card still runs to its length, but
+  won't nudge, because it has no zone to judge against.
