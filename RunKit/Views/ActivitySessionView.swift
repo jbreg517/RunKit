@@ -37,6 +37,7 @@ struct ActivitySessionView: View {
     @State private var location = LocationService.shared
     @State private var motion = MotionService.shared
     @State private var liveHR = LiveHeartRateService.shared
+    @State private var owner = RecordingOwner.shared
     /// Pedometer reading when the session began, so we can measure the delta.
     @State private var motionStartMeters: Double = 0
 
@@ -281,13 +282,19 @@ struct ActivitySessionView: View {
 
     @ViewBuilder
     private var setupWarnings: some View {
+        // Stated, not blocked. A hard block would depend on the two devices being in
+        // contact, which would strand someone whose watch is out of range — and the
+        // user may genuinely want to record here instead. They just have to know.
+        if let label = owner.remoteLabel, owner.isRemoteRecording {
+            warning("Your Apple Watch is already recording \(label.lowercased()). Starting here too will save the same run twice to Apple Health and double the calories. End it on your watch first.")
+        }
         if distanceUnavailable {
             warning("A ride has no way to measure distance without GPS, so a distance card would never finish. Turn GPS on, or give that card a time goal.")
         } else if needsDistance && !gpsEnabled {
             warning("GPS is off — distance comes from your step counter, so it's an estimate and there'll be no route map.")
         }
         if segments.contains(where: { $0.goal == .heartRate }) {
-            warning("A heart-rate card needs a Watch recording alongside you. Without one it still runs — it just won't nudge you about zones.")
+            warning("A heart-rate card needs live heart rate. Run it on your Apple Watch for zone nudges — recorded here it still runs, it just won't nudge.")
         }
     }
 
@@ -699,6 +706,7 @@ struct ActivitySessionView: View {
         pausedTotal = 0
         autoPaused = false
         autoPause = AutoPauseDetector.forActivity(liveActivity)
+        WatchBridge.shared.announceRecording(true, label: liveActivity.rawValue)
         // Baseline the pedometer so `sessionMeters` can measure the delta when GPS
         // is off. Updates were started in `onAppear`, so by the time the user has
         // configured and started a session the reading is already live.
@@ -1196,6 +1204,7 @@ struct ActivitySessionView: View {
         // A finished run may have ticked off today's scheduled workout — the watch
         // should stop offering it.
         WatchBridge.shared.publish(from: context, unit: unit)
+        WatchBridge.shared.announceRecording(false, label: "")
 
         // Spoken recap + quip (releases the audio session when it finishes).
         if voiceOn {

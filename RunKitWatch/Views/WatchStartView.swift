@@ -8,12 +8,14 @@ import SwiftUI
 struct WatchStartView: View {
     let item: WatchMenu.Item
     let unit: UnitSystem
+    @State private var owner = RecordingOwner.shared
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: RKWSpacing.lg) {
                 header
                 if item.segments.count > 1 { cardList }
+                if owner.isRemoteRecording { phoneRecordingWarning }
                 startButton
             }
             .padding(.horizontal, RKWSpacing.sm)
@@ -58,6 +60,21 @@ struct WatchStartView: View {
                             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
         }
+    }
+
+    /// Stated, not blocked — the same call as on the phone. Blocking would depend on
+    /// the two devices staying in contact, and this app exists to work without that.
+    private var phoneRecordingWarning: some View {
+        HStack(alignment: .top, spacing: RKWSpacing.md) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(RKW.accent)
+            Text("Your iPhone is already recording. Starting here saves the run twice.")
+                .font(RKWFont.caption)
+                .foregroundStyle(RKW.textSecondary)
+        }
+        .padding(RKWSpacing.md)
+        .background(RKW.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var startButton: some View {

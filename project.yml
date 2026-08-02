@@ -69,6 +69,7 @@ targets:
       - path: RunKit/Shared/WatchMenu.swift          # menu wire format
       - path: RunKit/Shared/WatchSession.swift       # finished-run wire format
       - path: RunKit/Shared/AutoPause.swift          # same thresholds on both devices
+      - path: RunKit/Shared/RecordingOwner.swift     # stops both devices recording one run
       - path: RunKit/Models/ActivitySegment.swift    # the card model itself
       - path: RunKit/Enums/ActivityType.swift
       - path: RunKit/Enums/WorkoutType.swift

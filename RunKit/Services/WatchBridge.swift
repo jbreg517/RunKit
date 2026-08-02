@@ -33,6 +33,16 @@ final class WatchBridge: NSObject {
         WCSession.isSupported() ? WCSession.default : nil
     }
 
+    /// Tell the watch this phone has started or stopped recording, so it warns
+    /// rather than starting a second recording of the same run. Best-effort — out
+    /// of range there's no message and nothing worth reporting.
+    func announceRecording(_ recording: Bool, label: String) {
+        guard let session, session.activationState == .activated,
+              session.isPaired, session.isReachable else { return }
+        session.sendMessage(RecordingOwner.message(recording: recording, label: label),
+                            replyHandler: nil) { _ in }
+    }
+
     /// Called once at launch. Safe to call again; activation is idempotent.
     func activate() {
         guard let session else { return }
@@ -164,6 +174,11 @@ extension WatchBridge: WCSessionDelegate {
     /// the content is unchanged.
     func sessionWatchStateDidChange(_ session: WCSession) {
         DispatchQueue.main.async { self.lastSent = nil }
+    }
+
+    /// The watch telling us it started or stopped a run.
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        DispatchQueue.main.async { RecordingOwner.shared.handle(message: message) }
     }
 
     /// A run recorded on the wrist.

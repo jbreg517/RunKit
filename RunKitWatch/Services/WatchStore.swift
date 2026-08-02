@@ -37,6 +37,18 @@ final class WatchStore: NSObject {
         }
     }
 
+    /// Tell the phone this watch has started or stopped recording, so it can warn
+    /// rather than start a second recording of the same run.
+    ///
+    /// Best-effort by design: out of range there is no message and no error worth
+    /// showing. The whole point of the watch app is running without the phone, so a
+    /// failure here must never hold up the run.
+    func announceRecording(_ recording: Bool, label: String) {
+        guard let session, session.activationState == .activated, session.isReachable else { return }
+        session.sendMessage(RecordingOwner.message(recording: recording, label: label),
+                            replyHandler: nil) { _ in }
+    }
+
     /// Queue a finished run for the phone.
     ///
     /// `transferFile`, not `sendMessage`: the run must survive the phone being out
@@ -82,6 +94,11 @@ extension WatchStore: WCSessionDelegate {
 
     func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
         adopt(context)
+    }
+
+    /// The phone telling us it started or stopped a run.
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        DispatchQueue.main.async { RecordingOwner.shared.handle(message: message) }
     }
 
     /// The system copies the file before queueing it, so the temp copy we wrote is

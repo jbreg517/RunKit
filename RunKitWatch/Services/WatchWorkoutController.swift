@@ -172,6 +172,7 @@ final class WatchWorkoutController: NSObject {
         startLocation()
         phase = .running
         startIntervalsIfNeeded()
+        WatchStore.shared.announceRecording(true, label: activity.rawValue)
         WKInterfaceDevice.current().play(.start)
         startTicker()
     }
@@ -497,6 +498,7 @@ final class WatchWorkoutController: NSObject {
         payload.route = route
 
         WatchStore.shared.send(payload)
+        WatchStore.shared.announceRecording(false, label: "")
         summary = Summary(activity: payload.activity,
                           seconds: elapsed,
                           meters: distanceMeters,

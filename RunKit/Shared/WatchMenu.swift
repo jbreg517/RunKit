@@ -144,6 +144,16 @@ struct WatchMenu: Codable, Hashable {
 enum WatchLink {
     /// Application-context key carrying an encoded `WatchMenu`.
     static let menuKey = "menu"
+    /// Message key: `true` while that device has a live recording.
+    ///
+    /// Deliberately a *message*, not application context. This is an event with a
+    /// short useful life — "I started, don't you start too" — and application
+    /// context is retained and replayed, which would leave a device believing the
+    /// other was still recording a run that ended hours ago.
+    static let recordingKey = "recording"
+    /// Message key carried alongside `recordingKey`: what's being recorded, for the
+    /// banner text.
+    static let recordingLabelKey = "recordingLabel"
     /// Filename prefix for a transferred `WatchSessionPayload`.
     static let sessionFilePrefix = "runkit-session-"
 
