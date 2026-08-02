@@ -17,6 +17,10 @@ struct RunKitWatchApp: App {
                     // appearing over a run that has already begun costs the user the
                     // first minute of it.
                     await WatchWorkoutController.shared.requestAuthorization()
+                    // Then pick up any run that outlived the app. Ordered after
+                    // authorization because recovery needs HealthKit access to do
+                    // anything with the session it gets back.
+                    WatchWorkoutController.shared.recoverIfNeeded()
                 }
         }
     }

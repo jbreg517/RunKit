@@ -8,6 +8,8 @@ import SwiftUI
 /// something anyone wants to operate on a 45mm screen mid-warm-up.
 struct WatchRootView: View {
     @State private var store = WatchStore.shared
+    @State private var controller = WatchWorkoutController.shared
+    @State private var showRecovered = false
 
     private var unit: UnitSystem { store.unit }
     private var menu: WatchMenu { store.menu }
@@ -30,6 +32,20 @@ struct WatchRootView: View {
             .listStyle(.plain)
             .navigationTitle("RunKit")
             .containerBackground(RKW.background, for: .navigation)
+            // A run that outlived the app comes straight back to the front. The
+            // alternative is a menu that looks idle while HealthKit is still
+            // recording — the user would reasonably start a second run.
+            .navigationDestination(isPresented: $showRecovered) {
+                if let item = controller.activeItem {
+                    WatchSessionView(item: item)
+                }
+            }
+            .onChange(of: controller.wasRecovered) { _, recovered in
+                if recovered {
+                    showRecovered = true
+                    controller.acknowledgeRecovery()
+                }
+            }
         }
         .tint(RKW.accent)
     }

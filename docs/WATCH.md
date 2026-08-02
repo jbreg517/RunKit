@@ -166,7 +166,42 @@ overwriting a wrist-measured summary with a worse re-query.
 **Transfers are idempotent on `WatchSessionPayload.id`.** WatchConnectivity can
 deliver a queued file more than once; without the id check the same run lands twice.
 | v0.53 | Post-run summary, split marks, and a real failure screen. |
-| later | The two-owner rule. Always-On display. Crash/relaunch recovery. Complications. Voice cues — the roadmap's open question is clip pack (bundle size, twice) vs system TTS; haptics carry v1 either way. |
+| — | Competitive pass against Apple Workout and Nike: auto-pause (product-wide, phone included), Always-On display, the two-owner rule, live HR zone + target feedback, splits/cadence/elevation, crash recovery. |
+| later | Complications. Voice cues — the roadmap's open question is clip pack (bundle size, twice) vs system TTS; haptics carry v1 either way. Apple-hardware-specific running power and stride metrics are deliberately not chased. |
+
+## Things that look like details and aren't
+
+**Auto-pause needs GPS to keep running while paused.** A *manual* pause suspends the
+receiver — the user has stopped on purpose, so that saves battery and avoids drift.
+An *automatic* pause must not, because measuring speed is the only way to know the
+run has started again. Hence `holdTracking`/`releaseTracking` alongside
+`pauseTracking`/`resumeTracking` on the phone: held, fixes keep arriving and keep
+updating speed while distance, route and gap detection stay frozen.
+
+**Auto-pause is gated on 20m covered.** Speed reads 0 until the first fix lands,
+which would otherwise pause every run about five seconds in.
+
+**Always-On means the clock cannot be a normal label.** The app is throttled to
+roughly one refresh a minute, so anything built from `elapsed` freezes.
+`Text(timerInterval:)` is rendered by the system — the same trick the Live Activity
+uses — which needs a start date with paused time already subtracted, re-anchored on
+every resume.
+
+**Elevation uses a moving reference, not the previous fix.** Per-fix thresholds fail
+both ways: too low and a wandering receiver reports a hundred metres of climb on a
+flat track, too high and a gradual hill — which rises less than the noise floor
+between fixes — is discarded entirely.
+
+**The two-owner signal is a guard, not a lock.** It only arrives when the devices are
+in contact, so it states the conflict rather than blocking. A block that depended on
+connectivity would strand the exact user the watch app exists for.
+
+**Crash recovery needs both halves.** `recoverActiveWorkoutSession` returns the live
+session with distance, HR and energy intact, but everything RunKit layers on top —
+card position, interval rep, zone buckets, splits — dies with the process. That's
+snapshotted to `UserDefaults` on every card change and every 30 seconds. A live
+session with *no* saved state is ended rather than resumed: the run is already safe
+in HealthKit, and resuming it as a shapeless one would produce a wrong record.
 
 ## Phone independence
 

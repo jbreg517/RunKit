@@ -43,6 +43,9 @@ final class WatchWorkoutController: NSObject {
     /// tapped Pause. Drives the label, and keeps a manual pause from being undone
     /// automatically.
     private(set) var autoPaused = false
+    /// True when this session was picked back up after the app was killed. The root
+    /// view uses it to re-present the run screen without the user going looking.
+    private(set) var wasRecovered = false
 
     /// A start date that already has paused time subtracted, so
     /// `Text(timerInterval:)` shows the same number our own clock does.
@@ -77,6 +80,12 @@ final class WatchWorkoutController: NSObject {
     var currentSegment: ActivitySegment? {
         segIndex < segments.count ? segments[segIndex] : nil
     }
+    /// What's being run, for a view that needs to re-present a recovered session.
+    var activeItem: WatchMenu.Item? { sourceItem }
+
+    /// Called by the view once it has re-presented a recovered run, so it isn't
+    /// presented again every time the root view redraws.
+    func acknowledgeRecovery() { wasRecovered = false }
     var unit: UnitSystem { WatchStore.shared.unit }
 
     /// Which of the five zones the wrist is reading, 1...5. Nil with no live heart
@@ -228,6 +237,7 @@ final class WatchWorkoutController: NSObject {
         startIntervalsIfNeeded()
         WatchStore.shared.announceRecording(true, label: activity.rawValue)
         WKInterfaceDevice.current().play(.start)
+        persist()
         startTicker()
     }
 
@@ -268,6 +278,7 @@ final class WatchWorkoutController: NSObject {
         // The HealthKit session pauses too, so distance and energy stop accruing at
         // the same instant our own clock does.
         session?.pause()
+        persist()
     }
 
     private func applyResume() {
@@ -278,6 +289,7 @@ final class WatchWorkoutController: NSObject {
         autoPaused = false
         autoPause.reset()
         session?.resume()
+        persist()
     }
 
     /// Auto-pause, using the same detector and thresholds as the phone so the same
@@ -378,6 +390,11 @@ final class WatchWorkoutController: NSObject {
 
         tickSegment()
         flushLocations()
+
+        // Periodic snapshot between the event-driven ones. Thirty seconds bounds
+        // what a kill can cost to a fraction of a card, without writing every
+        // second for a run that may last hours.
+        if Int(elapsed) % 30 == 0 { persist() }
     }
 
     /// One loop for every kind of card: intervals run their own rep machine, and
@@ -444,12 +461,14 @@ final class WatchWorkoutController: NSObject {
 
         guard !wasLast else {
             segmentsDone = true
+            persist()
             // Deliberately not auto-ending: the runner may want a cool-down, and
             // stopping the recording out from under them is not recoverable.
             WKInterfaceDevice.current().play(.success)
             return
         }
         startIntervalsIfNeeded()
+        persist()
         WKInterfaceDevice.current().play(.notification)
     }
 
@@ -562,6 +581,7 @@ final class WatchWorkoutController: NSObject {
 
         WatchStore.shared.send(payload)
         WatchStore.shared.announceRecording(false, label: "")
+        WatchRunState.clear()
         summary = Summary(activity: payload.activity,
                           seconds: elapsed,
                           meters: distanceMeters,
@@ -586,6 +606,106 @@ final class WatchWorkoutController: NSObject {
     /// approximate.
     private func averageBpm() -> Double {
         bpmSamples > 0 ? bpmSum / Double(bpmSamples) : 0
+    }
+
+    // MARK: - Crash recovery
+
+    /// Snapshot of everything HealthKit doesn't hold.
+    private func snapshot() -> WatchRunState {
+        var s = WatchRunState()
+        s.item = sourceItem ?? WatchMenu.Item()
+        s.startedAt = startDate ?? Date()
+        s.pausedTotal = pausedTotal
+        s.pausedAt = pausedAt
+        s.autoPaused = autoPaused
+        s.segIndex = segIndex
+        s.segStartElapsed = segStartElapsed
+        s.segStartMeters = segStartMeters
+        s.segmentsDone = segmentsDone
+        s.intRep = intRep
+        s.intPhaseIsWork = intPhaseIsWork
+        s.phaseEndsAt = phaseEndsAt
+        s.intervalsDone = intervalsDone
+        s.markedUnits = markedUnits
+        s.lastSplitElapsed = lastSplitElapsed
+        s.splits = splits
+        s.zoneSeconds = zoneSeconds
+        s.bpmSum = bpmSum
+        s.bpmSamples = bpmSamples
+        s.maxBpm = maxBpm
+        s.elevationGain = elevationGain
+        s.usedGPS = usedGPS
+        return s
+    }
+
+    private func persist() { WatchRunState.save(snapshot()) }
+
+    /// Re-attach to a workout that outlived the app.
+    ///
+    /// Called once at launch. HealthKit hands back the still-running session with
+    /// its distance, heart rate and energy intact; the saved state supplies
+    /// everything else. Without the state half, a structured workout would come
+    /// back as a shapeless one — still recording, but no longer the workout the
+    /// runner started.
+    func recoverIfNeeded() {
+        guard phase == .idle, HKHealthStore.isHealthDataAvailable() else { return }
+        healthStore.recoverActiveWorkoutSession { [weak self] session, _ in
+            guard let self, let session else { return }
+            DispatchQueue.main.async { self.attach(to: session) }
+        }
+    }
+
+    @MainActor
+    private func attach(to recovered: HKWorkoutSession) {
+        // A live session with no saved state can't be reconstructed into the
+        // workout it was. Ending it is honest — the run is already safe in
+        // HealthKit, and pretending to resume it would produce a wrong record.
+        guard let state = WatchRunState.load() else {
+            recovered.end()
+            return
+        }
+        guard phase == .idle else { return }
+
+        session = recovered
+        let b = recovered.associatedWorkoutBuilder()
+        // The data source is deliberately not re-set: the recovered builder still
+        // has its own, and replacing it restarts collection.
+        recovered.delegate = self
+        b.delegate = self
+        builder = b
+        routeBuilder = HKWorkoutRouteBuilder(healthStore: healthStore, device: .local())
+
+        sourceItem = state.item
+        segments = state.item.segments.isEmpty ? ActivitySegment.starter : state.item.segments
+        startDate = state.startedAt
+        effectiveStart = state.startedAt.addingTimeInterval(state.pausedTotal)
+        pausedTotal = state.pausedTotal
+        pausedAt = state.pausedAt
+        autoPaused = state.autoPaused
+        segIndex = state.segIndex
+        segStartElapsed = state.segStartElapsed
+        segStartMeters = state.segStartMeters
+        segmentsDone = state.segmentsDone
+        intRep = state.intRep
+        intPhaseIsWork = state.intPhaseIsWork
+        phaseEndsAt = state.phaseEndsAt
+        intervalsDone = state.intervalsDone
+        markedUnits = state.markedUnits
+        lastSplitElapsed = state.lastSplitElapsed
+        splits = state.splits
+        zoneSeconds = state.zoneSeconds
+        bpmSum = state.bpmSum
+        bpmSamples = state.bpmSamples
+        maxBpm = state.maxBpm
+        elevationGain = state.elevationGain
+        usedGPS = state.usedGPS
+        elapsed = Date().timeIntervalSince(state.startedAt) - state.pausedTotal
+        autoPause = AutoPauseDetector.forActivity(state.item.activity)
+
+        startLocation()
+        phase = state.pausedAt == nil ? .running : .paused
+        wasRecovered = true
+        startTicker()
     }
 
     private static func hkActivity(_ type: ActivityType) -> HKWorkoutActivityType {
@@ -613,6 +733,10 @@ extension WatchWorkoutController: HKWorkoutSessionDelegate {
             self.ticker?.invalidate()
             self.ticker = nil
             self.stopLocation()
+            // Nothing to recover into — the session is gone, so leaving the state
+            // behind would only make the next launch try to resume a run that no
+            // longer exists.
+            WatchRunState.clear()
             self.phase = .failed(error.localizedDescription)
         }
     }
