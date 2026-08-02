@@ -113,6 +113,25 @@ final class HealthService {
         return await latestValue(.vo2Max, unit: unit)
     }
 
+    /// Today's step total from Apple Health — the aggregated, cross-device figure the
+    /// Health app shows (iPhone + Apple Watch + any source), which `CMPedometer` can't
+    /// give because it only sees this iPhone. Nil when Health is unavailable or the
+    /// read wasn't authorised, so the caller can fall back to the pedometer.
+    func todaySteps() async -> Int? {
+        guard available, let type = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return nil }
+        let start = Calendar.current.startOfDay(for: Date())
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictStartDate)
+        let descriptor = HKStatisticsQueryDescriptor(
+            predicate: .quantitySample(type: type, predicate: predicate),
+            options: .cumulativeSum)
+        do {
+            guard let sum = try await descriptor.result(for: store)?.sumQuantity() else { return nil }
+            return Int(sum.doubleValue(for: .count()))
+        } catch {
+            return nil
+        }
+    }
+
     /// Saves a finished session to Health via the workout builder, attaching the
     /// GPS route when one was recorded so it appears in Apple Fitness alongside the
     /// rest of the suite. Best-effort and on-device only — failures are ignored.

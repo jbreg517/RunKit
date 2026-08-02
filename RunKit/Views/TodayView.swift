@@ -65,10 +65,16 @@ struct TodayView: View {
         StreakCalculator.compute(dates: sessions.map(\.startedAt), weeklyTarget: weeklyTarget)
     }
 
+    /// Apple Health's aggregated step total for today, when available. `CMPedometer`
+    /// (this iPhone only) undercounts vs Health, which also includes the Watch — so
+    /// prefer Health and fall back to the pedometer.
+    @State private var hkSteps: Int?
+    private var steps: Int { hkSteps ?? motion.steps }
+
     private var progress: Double {
-        goal > 0 ? min(1, Double(motion.steps) / Double(goal)) : 0
+        goal > 0 ? min(1, Double(steps) / Double(goal)) : 0
     }
-    private var estimatedKcal: Double { Double(motion.steps) * 0.04 }
+    private var estimatedKcal: Double { Double(steps) * 0.04 }
 
     var body: some View {
         NavigationStack {
@@ -109,6 +115,9 @@ struct TodayView: View {
                 // the publish above, which must stay synchronous.
                 await WatchBridge.shared.refreshHRInputs()
                 WatchBridge.shared.publish(from: context, unit: unit)
+                // Apple Health's aggregated step total (includes the Watch); falls
+                // back to CMPedometer when Health isn't authorised.
+                hkSteps = await HealthService.shared.todaySteps()
             }
             .sheet(item: $sheet) { which in
                 switch which {
@@ -520,7 +529,7 @@ struct TodayView: View {
                     .rotationEffect(.degrees(-90))
                     .animation(.easeOut, value: progress)
                 VStack(spacing: 0) {
-                    Text("\(motion.steps)")
+                    Text("\(steps)")
                         .font(.system(size: 30, weight: .heavy, design: .rounded))
                         .foregroundColor(RKColor.textPrimary)
                         .lineLimit(1).minimumScaleFactor(0.6)
