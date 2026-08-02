@@ -156,17 +156,24 @@ struct WatchSessionView: View {
 
             HStack(alignment: .top, spacing: RKWSpacing.md) {
                 metric(unit.distanceString(controller.distanceMeters), "distance")
-                metric(paceText, paceLabel)
+                metric(paceText, paceLabel, tint: paceTint)
             }
             // Dropped in Always-On. BPM changes constantly and the screen only
             // refreshes about once a minute, so a stale number here is worse than
             // no number — and kcal is nobody's mid-run glance.
             if !dimmed {
                 HStack(alignment: .top, spacing: RKWSpacing.md) {
-                    metric(controller.bpm > 0 ? "\(Int(controller.bpm))" : "--", "bpm",
-                           tint: controller.bpm > 0 ? RKW.danger : RKW.textMuted)
+                    metric(controller.bpm > 0 ? "\(Int(controller.bpm))" : "--", bpmLabel,
+                           tint: bpmTint)
                     metric("\(Int(controller.kcal))", "kcal")
                 }
+            }
+            // Words, not arrows. "↑" next to a pace could mean either "your pace
+            // number should go up" or "speed up", and those are opposites.
+            if !dimmed, let cue = targetCue {
+                Text(cue)
+                    .font(RKWFont.label)
+                    .foregroundStyle(RKW.danger)
             }
             if dimmed, controller.phase == .paused {
                 Text(controller.autoPaused ? "AUTO-PAUSED" : "PAUSED")
@@ -211,6 +218,45 @@ struct WatchSessionView: View {
     /// On a ride the same number reads as a speed, matching the phone and the Live
     /// Activity — nobody thinks in minutes per kilometre on a bike.
     private var paceLabel: String { item.activity == .ride ? "speed" : "pace" }
+
+    /// The zone replaces the bare "bpm" caption when there's one to show — a number
+    /// on its own doesn't tell you whether you're working correctly, which is the
+    /// entire point of running to a zone.
+    private var bpmLabel: String {
+        if let zone = controller.currentZone { return "bpm · zone \(zone)" }
+        return "bpm"
+    }
+
+    /// Colour carries the same verdict as the haptic, so the glance and the buzz
+    /// always agree. Gold for on-target rather than green: green reads as "good"
+    /// generally, and here it specifically means "inside the band".
+    private func targetTint(_ fallback: Color) -> Color {
+        switch controller.targetState {
+        case .none:            return fallback
+        case .on:              return RKW.accent
+        case .below, .above:   return RKW.danger
+        }
+    }
+
+    private var paceTint: Color {
+        controller.currentSegment?.goal == .pace ? targetTint(RKW.textPrimary) : RKW.textPrimary
+    }
+
+    /// `.below` means below target — running slower, or heart rate under the zone —
+    /// so the instruction is to work harder.
+    private var targetCue: String? {
+        switch controller.targetState {
+        case .below: return "PICK IT UP"
+        case .above: return "EASE OFF"
+        case .on, .none: return nil
+        }
+    }
+
+    private var bpmTint: Color {
+        guard controller.bpm > 0 else { return RKW.textMuted }
+        return controller.currentSegment?.goal == .heartRate
+            ? targetTint(RKW.danger) : RKW.danger
+    }
 
     private var paceText: String {
         guard controller.phase == .running, controller.speedMps > 0.3 else { return "--" }

@@ -69,6 +69,46 @@ final class WatchWorkoutController: NSObject {
     }
     var unit: UnitSystem { WatchStore.shared.unit }
 
+    /// Which of the five zones the wrist is reading, 1...5. Nil with no live heart
+    /// rate, or when the phone has never synced a max HR — showing "Zone 1" in
+    /// either case would be inventing a number.
+    var currentZone: Int? {
+        guard bpm > 0 else { return nil }
+        let zones = WatchStore.shared.menu.zones
+        guard !zones.isEmpty else { return nil }
+        return HeartRateZones.zoneIndex(for: bpm, zones: zones) + 1
+    }
+
+    /// Where the runner sits against the current card's target.
+    ///
+    /// Only the *held* goals have one — pace and heart rate are things you stay
+    /// inside, so being outside is information. Distance and time targets are
+    /// reached rather than held, and there is no "too fast" for them.
+    enum TargetState { case none, below, on, above }
+
+    var targetState: TargetState {
+        guard let seg = currentSegment, phase == .running else { return .none }
+        switch seg.goal {
+        case .pace:
+            guard seg.paceTargetSecPerMeter > 0, speedMps > 0.4 else { return .none }
+            // >1 means slower than target, matching the nudge thresholds exactly so
+            // the colour and the haptic can never disagree.
+            let ratio = (1.0 / speedMps) / seg.paceTargetSecPerMeter
+            if ratio > 1.08 { return .below }
+            if ratio < 0.92 { return .above }
+            return .on
+        case .heartRate:
+            guard bpm > 0 else { return .none }
+            let zones = WatchStore.shared.menu.zones
+            guard let zone = zones.first(where: { $0.index == seg.hrZone }) else { return .none }
+            if bpm < zone.lower { return .below }
+            if bpm > zone.upper { return .above }
+            return .on
+        default:
+            return .none
+        }
+    }
+
     // MARK: Private
 
     private let healthStore = HKHealthStore()
