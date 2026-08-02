@@ -167,6 +167,7 @@ struct RunKitApp: App {
 struct RootTabView: View {
     let storeWarning: String?
 
+    @Environment(\.modelContext) private var context
     @State private var router = AppRouter()
     @State private var acknowledged = false
 
@@ -184,6 +185,10 @@ struct RootTabView: View {
         }
         .tint(RKColor.accent)
         .environment(router)
+        // A run whose review screen was killed before the user chose. It's already
+        // in RunKit's store; this is what gets it into Apple Health, as recorded.
+        // At the app root rather than in a tab, so it runs whichever tab opens.
+        .task { await PendingRunCommit.sweep(context) }
         // Presented here rather than inside a tab so "Do Again" works from
         // History too, and a running session gets the full screen.
         .fullScreenCover(isPresented: $router.showActivity) {

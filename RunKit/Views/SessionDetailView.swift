@@ -75,16 +75,16 @@ struct SessionDetailView: View {
 
     // MARK: Edit / delete
 
-    private func applyEdits(type: ActivityType, notes: String, distanceMeters: Double?) {
-        session.typeRaw = type.rawValue
-        session.notes = notes.isEmpty ? nil : notes
-        if let meters = distanceMeters {
-            session.distanceMeters = meters
-            session.manualDistance = true
-            session.distanceEstimated = false   // user-entered is authoritative
-        }
-        session.activeEnergyKcal = HealthCalc.kcal(type: type, minutes: session.activeSeconds / 60)
+    private func applyEdits(_ edits: RunEdits) {
+        guard edits.apply(to: session, unit: unit) else { return }
+        // Recomputed from whatever the time and type ended up as — an edited
+        // duration that left the old calorie figure behind would be inconsistent
+        // with everything else on the screen.
+        session.activeEnergyKcal = HealthCalc.kcal(type: session.type,
+                                                   minutes: session.activeSeconds / 60)
         Persist.save(context)
+        // Stats, streaks and the suite feed all read these numbers.
+        SuiteActivityPublisher.publish(from: context)
     }
 
     private func deleteSession() {
@@ -102,7 +102,8 @@ struct SessionDetailView: View {
     private var summaryTiles: some View {
         HStack(spacing: RKSpacing.md) {
             tile("Distance", unit.distanceString(session.distanceMeters),
-                 caption: session.distanceEstimated ? "~ estimated" : nil)
+                 caption: session.manualDistance ? "edited"
+                                                 : (session.distanceEstimated ? "~ estimated" : nil))
             tile("Duration", durationString(session.activeSeconds))
             tile(session.type == .ride ? "Avg Speed" : "Avg Pace",
                  session.type == .ride
@@ -119,6 +120,14 @@ struct SessionDetailView: View {
             if session.distanceEstimated {
                 Label("Some distance was estimated where GPS was unavailable.",
                       systemImage: "exclamationmark.triangle")
+                    .font(RKFont.caption)
+                    .foregroundColor(RKColor.textMuted)
+            }
+            // Said out loud, because otherwise RunKit and Apple Health quietly
+            // disagree and there is nothing on screen explaining why.
+            if let edited = session.editedAt {
+                Label("Edited \(edited.formatted(date: .abbreviated, time: .shortened)). Apple Health still shows the original.",
+                      systemImage: "pencil")
                     .font(RKFont.caption)
                     .foregroundColor(RKColor.textMuted)
             }
@@ -337,60 +346,42 @@ struct SessionDetailView: View {
 }
 
 /// Staged-draft editor for a completed session. Changes apply only on Save.
-/// Distance is editable for rides and manual/no-GPS sessions; GPS-derived
-/// distance stays read-only (it comes from the route).
+///
+/// Time and distance are both editable, on every session including GPS ones. The
+/// route stays exactly as recorded — a corrected total doesn't make the track
+/// wrong, it means the track didn't capture the whole run (a tunnel, a lost fix,
+/// a treadmill). Splits and heart-rate zone seconds are likewise left alone:
+/// they were measured against the original numbers, and rescaling them to a new
+/// total would be inventing data rather than correcting it.
 private struct SessionEditSheet: View {
     let session: ActivitySession
     let unit: UnitSystem
-    let onSave: (ActivityType, String, Double?) -> Void
+    let onSave: (RunEdits) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var type: ActivityType
-    @State private var notes: String
-    @State private var distanceText: String
+    @State private var edits: RunEdits
 
-    init(session: ActivitySession, unit: UnitSystem,
-         onSave: @escaping (ActivityType, String, Double?) -> Void) {
+    init(session: ActivitySession, unit: UnitSystem, onSave: @escaping (RunEdits) -> Void) {
         self.session = session
         self.unit = unit
         self.onSave = onSave
-        _type = State(initialValue: session.type)
-        _notes = State(initialValue: session.notes ?? "")
-        _distanceText = State(initialValue: String(format: "%.2f", unit.distance(session.distanceMeters)))
+        _edits = State(initialValue: RunEdits(session, unit: unit))
     }
-
-    /// Rides and sessions without a GPS track allow a manual distance.
-    private var distanceEditable: Bool { session.type == .ride || !session.usedGPS }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Activity") {
-                    Picker("Type", selection: $type) {
-                        ForEach(ActivityType.allCases) { t in
-                            Label(t.rawValue, systemImage: t.sfSymbol).tag(t)
-                        }
-                    }
+            ScrollView {
+                VStack(alignment: .leading, spacing: RKSpacing.lg) {
+                    RunEditForm(edits: $edits, unit: unit)
+                    Text(footnote)
+                        .font(RKFont.caption)
+                        .foregroundColor(RKColor.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-
-                if distanceEditable {
-                    Section("Distance (\(unit.distanceUnit))") {
-                        TextField("Distance", text: $distanceText)
-                            .keyboardType(.decimalPad)
-                    }
-                } else {
-                    Section {
-                        LabeledContent("Distance", value: unit.distanceString(session.distanceMeters))
-                    } footer: {
-                        Text("Distance is measured from your GPS route and can’t be edited.")
-                    }
-                }
-
-                Section("Notes") {
-                    TextField("Notes", text: $notes, axis: .vertical)
-                        .lineLimit(3...6)
-                }
+                .padding(RKSpacing.md)
+                .readableWidth()
             }
+            .background(RKColor.background.ignoresSafeArea())
             .navigationTitle("Edit Activity")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -399,12 +390,23 @@ private struct SessionEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        let meters = distanceEditable ? unit.meters(fromDisplay: distanceText) : nil
-                        onSave(type, notes, meters)
+                        onSave(edits)
                         dismiss()
                     }
                 }
             }
         }
+    }
+
+    /// Says plainly what an edit does and doesn't reach, rather than letting the two
+    /// apps disagree without explanation.
+    private var footnote: String {
+        var text = "Apple Health keeps this activity as it was recorded — an edit here "
+            + "applies to RunKit only, and RunKit is what your stats and streaks use."
+        if session.usedGPS {
+            text += " Your route map stays as recorded; correcting the total doesn’t "
+                + "change where you went."
+        }
+        return text
     }
 }

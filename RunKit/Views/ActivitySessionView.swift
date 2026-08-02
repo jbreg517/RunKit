@@ -44,6 +44,15 @@ struct ActivitySessionView: View {
     @State private var indoor = false
     /// Rolling (elapsed, metres) samples for pace when there's no GPS speed to read.
     @State private var paceTrail: [(t: TimeInterval, d: Double)] = []
+
+    // MARK: Review
+    /// The finished run awaiting Save or Discard. Non-nil puts the screen into
+    /// review; nothing has reached Apple Health yet at this point.
+    @State private var reviewSession: ActivitySession?
+    @State private var editing = false
+    @State private var edits = RunEdits.empty
+    @State private var committing = false
+    @State private var confirmDiscard = false
     /// Pedometer reading when the session began, so we can measure the delta.
     @State private var motionStartMeters: Double = 0
 
@@ -161,7 +170,13 @@ struct ActivitySessionView: View {
                 RKColor.background.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: RKSpacing.lg) {
-                        if session == nil { setup } else { live }
+                        if let finished = reviewSession {
+                            review(finished)
+                        } else if session == nil {
+                            setup
+                        } else {
+                            live
+                        }
                     }
                     .padding(.vertical, RKSpacing.lg)
                     .readableWidth()
@@ -173,7 +188,9 @@ struct ActivitySessionView: View {
             }
             .navigationTitle("Activity")
             .toolbar { toolbarContent }
-            .interactiveDismissDisabled(session != nil)
+            // Also locked during review: a swipe-down there would leave the run
+            // pending with no obvious way back to it until the next launch sweep.
+            .interactiveDismissDisabled(session != nil || reviewSession != nil)
             .onAppear {
                 consumePendingWorkout()
                 // Warm the pedometer so a GPS-off session has a live baseline to
@@ -188,9 +205,14 @@ struct ActivitySessionView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) {
             // Only offered when idle: a running session lives in this view's
-            // state, so dismissing mid-run would discard it.
-            if session == nil {
+            // state, so dismissing mid-run would discard it. Reviewing is not idle —
+            // walking away there means "keep it as recorded", never "throw it away",
+            // so Close saves rather than closing on an unresolved run.
+            if session == nil, reviewSession == nil {
                 Button("Close") { dismiss() }
+            } else if let finished = reviewSession {
+                Button("Save") { saveReview(finished) }
+                    .disabled(committing)
             }
         }
         ToolbarItemGroup(placement: .keyboard) {
@@ -1155,6 +1177,123 @@ struct ActivitySessionView: View {
         }
     }
 
+    // MARK: - Review
+
+    /// Shown once a run ends, before anything irreversible happens to it. The run is
+    /// already safe in RunKit's store; Apple Health, the suite feed and the plan
+    /// tick-off all wait for Save.
+    @ViewBuilder
+    private func review(_ s: ActivitySession) -> some View {
+        VStack(spacing: RKSpacing.lg) {
+            VStack(spacing: RKSpacing.xs) {
+                Text("Nice work")
+                    .font(RKFont.title)
+                    .foregroundColor(RKColor.textPrimary)
+                Text(s.startedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(RKFont.caption)
+                    .foregroundColor(RKColor.textMuted)
+            }
+
+            reviewMetrics(s)
+
+            if editing {
+                RunEditForm(edits: $edits, unit: unit)
+                    .padding(.horizontal, RKSpacing.md)
+                Text("Apple Health keeps the numbers as recorded — RunKit shows your corrected version.")
+                    .font(RKFont.caption)
+                    .foregroundColor(RKColor.textMuted)
+                    .padding(.horizontal, RKSpacing.md)
+            }
+
+            VStack(spacing: RKSpacing.sm) {
+                Button(editing ? "Save changes" : "Save") { saveReview(s) }
+                    .buttonStyle(RKPrimaryButtonStyle())
+                    .disabled(committing)
+                if !editing {
+                    Button("Edit") { withAnimation { editing = true } }
+                        .buttonStyle(RKSecondaryButtonStyle())
+                }
+                Button(role: .destructive) { confirmDiscard = true } label: {
+                    Text("Discard").frame(maxWidth: .infinity)
+                }
+                .disabled(committing)
+            }
+            .padding(.horizontal, RKSpacing.md)
+        }
+        .alert("Discard this run?", isPresented: $confirmDiscard) {
+            Button("Discard", role: .destructive) { discardReview(s) }
+            Button("Keep", role: .cancel) {}
+        } message: {
+            Text("It hasn’t been saved to Apple Health yet, so nothing will be left behind. This can’t be undone.")
+        }
+    }
+
+    /// Live values are gone by now — everything here reads the saved session, and
+    /// the edit fields when they'd differ, so Save previews what it will write.
+    private func reviewMetrics(_ s: ActivitySession) -> some View {
+        let seconds = editing ? (RunEdits.seconds(from: edits.durationText) ?? s.activeSeconds)
+                              : s.activeSeconds
+        let meters = editing ? (unit.meters(fromDisplay: edits.distanceText) ?? s.distanceMeters)
+                             : s.distanceMeters
+        let type = editing ? edits.type : s.type
+        return VStack(spacing: RKSpacing.md) {
+            HStack {
+                reviewMetric(timeString(seconds), "time")
+                reviewMetric(unit.distanceString(meters), "distance")
+            }
+            HStack {
+                reviewMetric(type == .ride ? unit.speedString(seconds: seconds, meters: meters)
+                                           : unit.paceString(seconds: seconds, meters: meters),
+                             type == .ride ? "avg speed" : "avg pace")
+                reviewMetric("\(Int(s.activeEnergyKcal))", "kcal")
+            }
+            if s.hasHeartRate {
+                HStack {
+                    reviewMetric("\(Int(s.avgHeartRateBpm))", "avg bpm")
+                    reviewMetric("\(Int(s.maxHeartRateBpm))", "max bpm")
+                }
+            }
+        }
+        .padding(.horizontal, RKSpacing.md)
+    }
+
+    private func reviewMetric(_ value: String, _ caption: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(value)
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .foregroundColor(RKColor.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(caption)
+                .font(RKFont.caption)
+                .foregroundColor(RKColor.textMuted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func saveReview(_ s: ActivitySession) {
+        guard !committing else { return }
+        committing = true
+        if editing { edits.apply(to: s, unit: unit) }
+        Task {
+            await PendingRunCommit.commit(s, in: context)
+            reviewSession = nil
+            editing = false
+            committing = false
+            dismiss()
+        }
+    }
+
+    private func discardReview(_ s: ActivitySession) {
+        PendingRunCommit.discard(s, in: context)
+        reviewSession = nil
+        editing = false
+        // The watch was told a run was in progress; it needs to know it isn't now,
+        // even though this one is being thrown away.
+        WatchBridge.shared.announceRecording(false, label: "")
+        dismiss()
+    }
+
     private func finish() {
         // Finishing while paused: bank the final stretch so `pausedSeconds` is
         // complete and `elapsed` isn't left short.
@@ -1210,17 +1349,12 @@ struct ActivitySessionView: View {
         s.endedAt = end
         s.activeSeconds = seconds
         s.pausedSeconds = paused
-
-        // Tick off the scheduled run this session came from, if any.
-        if let id = activeScheduleID {
-            let match = FetchDescriptor<ScheduledRun>(
-                predicate: #Predicate<ScheduledRun> { $0.id == id })
-            if let sched = try? context.fetch(match).first {
-                sched.isCompleted = true
-                sched.completedAt = end
-            }
-            activeScheduleID = nil
-        }
+        s.isPendingReview = true
+        // Recorded rather than acted on: the plan is only ticked off once the run is
+        // accepted, and the id has to outlive this view so a force-quit at the
+        // review screen doesn't lose it.
+        s.fromScheduleID = activeScheduleID
+        activeScheduleID = nil
 
         let ped = await MotionService.shared.pedometer(from: s.startedAt, to: end)
         if s.type.pedometerDistance, let steps = ped?.steps { s.steps = steps }
@@ -1241,16 +1375,13 @@ struct ActivitySessionView: View {
         s.distanceMeters = distance
         s.distanceEstimated = estimated
         s.activeEnergyKcal = kcal(perActivity: perActivity, fallbackSeconds: seconds, type: s.type)
+        // Saved to RunKit's own store right away — the run must survive whatever
+        // happens next. Everything harder to undo (Health, the suite feed, the
+        // scheduled tick-off) waits for Save on the review screen; see
+        // `PendingRunCommit`.
         Persist.save(context)
-
-        // Republish the suite feed while today's load is fresh, so FuelKit sees a
-        // hard session before the user opens it rather than after.
-        SuiteActivityPublisher.publish(from: context)
-
-        // A finished run may have ticked off today's scheduled workout — the watch
-        // should stop offering it.
-        WatchBridge.shared.publish(from: context, unit: unit)
-        WatchBridge.shared.announceRecording(false, label: "")
+        edits = RunEdits(s, unit: unit)
+        reviewSession = s
 
         // Spoken recap + quip (releases the audio session when it finishes).
         if voiceOn {
@@ -1260,18 +1391,6 @@ struct ActivitySessionView: View {
         } else {
             SpeechService.shared.stop()
         }
-
-        await HealthService.shared.save(s)
-
-        // Cache the heart-rate summary now, while the session's window is fresh.
-        // No Watch simply leaves it at zero. Written after the workout save so
-        // Health has the workout to attribute samples to.
-        let resting = await HealthService.shared.latestRestingHeartRate()
-        let maxHR = HeartRateZones.maxHeartRate(
-            override: maxHeartRateOverride,
-            observed: nil,
-            age: SuiteProfileStore.load()?.age ?? 0)
-        await HeartRateBackfill.fill(s, zones: HeartRateZones.zones(maxHR: maxHR, restingHR: resting))
     }
 
     /// Calories summed per card, so a run/walk workout isn't priced entirely at

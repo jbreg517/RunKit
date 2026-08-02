@@ -24,6 +24,21 @@ final class ActivitySession {
     /// Drives `HKMetadataKeyIndoorWorkout`, which is what makes Apple Health label
     /// it "Indoor Run" rather than quietly filing a treadmill run as an outdoor one.
     var isIndoor: Bool = false
+    /// Finished but not yet accepted by the user — the review screen is showing, or
+    /// was showing when the app died.
+    ///
+    /// While true the run exists in RunKit's own store but has **not** been written
+    /// to Apple Health, published to the suite, or used to tick off a scheduled run.
+    /// Those all wait for Save, because a discarded run must leave no trace, and
+    /// deleting a workout back out of Health afterwards is not something to rely on.
+    ///
+    /// Defaults false so every existing session, and every run imported from the
+    /// watch (already in Health by the time it arrives), is treated as settled.
+    var isPendingReview: Bool = false
+    /// The `ScheduledRun` this came from, if any. On the session rather than in view
+    /// state so the tick-off survives the app being killed at the review screen —
+    /// and so discarding the run leaves the plan untouched.
+    var fromScheduleID: UUID?
     var manualDistance: Bool = false
     /// True when some of `distanceMeters` came from a fallback (pedometer fill or
     /// a straight-line GPS-gap bridge) rather than a clean GPS track.
@@ -60,6 +75,13 @@ final class ActivitySession {
     var hasDecoupling: Bool = false
     var decouplingNote: String = ""
     var notes: String?
+    /// When the user last corrected the recorded numbers by hand.
+    ///
+    /// Apple Health is **not** updated by an edit. Rewriting a saved workout means
+    /// deleting and re-adding it, which changes its identity and would disturb
+    /// anything already referencing it. So RunKit becomes the source of truth for a
+    /// corrected run and says so, rather than silently disagreeing with Health.
+    var editedAt: Date?
 
     @Relationship(deleteRule: .cascade, inverse: \RoutePoint.session)
     var route: [RoutePoint] = []

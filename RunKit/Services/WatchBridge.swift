@@ -219,6 +219,11 @@ extension WatchBridge {
         s.usedGPS = payload.usedGPS
         s.steps = payload.steps
         s.isIndoor = payload.isIndoor
+        // Explicitly settled, not merely left at its default. A wrist-recorded run
+        // was written to Health by the watch before it ever left it, so it must
+        // never enter the review flow — that would offer a Discard the phone cannot
+        // honour, and put it in the launch sweep's path to be saved to Health twice.
+        s.isPendingReview = false
         s.avgHeartRateBpm = payload.avgHeartRateBpm
         s.maxHeartRateBpm = payload.maxHeartRateBpm
         s.hrZoneSecondsJSON = HeartRateZones.encode(payload.hrZoneSeconds)
