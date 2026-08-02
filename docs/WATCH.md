@@ -107,6 +107,14 @@ Traps, all of them load-bearing:
   platform-specific variants are `MAC_*` and `TVOS_*` only. `fetch-signing-files`
   also prefix-matches the bundle ID unless given `--strict-match-identifier`, so the
   call for `com.ferrixguild.runkit` already picks up both extensions.
+- `WKBackgroundModes` takes **exactly one** session mode. `workout-processing`,
+  `location`, `self-care`, `mindfulness`, `physical-therapy` and `alarm` are mutually
+  exclusive — watchOS grants one kind of extended runtime session, not a set — and
+  declaring two fails App Store upload validation with error 90362. Only
+  `workout-processing` is needed here: the live `HKWorkoutSession` keeps the app out
+  of suspension, so GPS keeps arriving with the wrist down. For the same reason
+  `allowsBackgroundLocationUpdates` is never set — it requires the `location` mode
+  and throws at runtime without it.
 - Every embedded bundle must report the **same version** as the host app, so
   `RunKitWatch/Info.plist` is in the PlistBuddy mirroring loop in both workflows. A
   mismatch is a hard App Store validation rejection.

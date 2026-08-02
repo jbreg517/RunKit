@@ -339,14 +339,17 @@ final class WatchWorkoutController: NSObject {
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         locationManager.activityType = .fitness
-        locationManager.allowsBackgroundLocationUpdates = true
         locationManager.requestWhenInUseAuthorization()
         locationManager.startUpdatingLocation()
+        // `allowsBackgroundLocationUpdates` is deliberately NOT set. It requires the
+        // `location` background mode, which can't coexist with `workout-processing`
+        // — and it isn't needed: the live workout session keeps the app out of
+        // suspension, so fixes keep arriving with the wrist down. Setting it without
+        // the matching mode is also how you get a CoreLocation exception at runtime.
     }
 
     private func stopLocation() {
         locationManager.stopUpdatingLocation()
-        locationManager.allowsBackgroundLocationUpdates = false
     }
 
     /// Hands buffered fixes to the route builder once a second rather than per

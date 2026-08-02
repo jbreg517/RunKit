@@ -29,11 +29,19 @@
 	<key>WKCompanionAppBundleIdentifier</key>
 	<string>com.ferrixguild.runkit</string>
 	<!-- Without workout-processing the app is suspended the moment the wrist drops,
-	     which stops the card engine, the interval timer and the haptics mid-run. -->
+	     which stops the card engine, the interval timer and the haptics mid-run.
+
+	     EXACTLY ONE session mode is allowed. workout-processing, location,
+	     self-care, mindfulness, physical-therapy and alarm are mutually exclusive —
+	     watchOS grants one kind of extended runtime session, not a set — and
+	     declaring two fails App Store validation with error 90362.
+
+	     Only workout-processing is needed. The live HKWorkoutSession is what keeps
+	     the app running, and GPS keeps arriving because the app is never suspended;
+	     the separate location mode is for apps tracking location WITHOUT a workout. -->
 	<key>WKBackgroundModes</key>
 	<array>
 		<string>workout-processing</string>
-		<string>location</string>
 	</array>
 	<key>NSHealthShareUsageDescription</key>
 	<string>RunKit reads your heart rate, distance and energy while you record a walk, run or ride, so it can show live metrics and hold you to a heart-rate zone. This stays on your device.</string>
