@@ -46,7 +46,7 @@ prerequisite for analytics.** That reorders Phase 3.
 | **Personal records** (fastest 1 K / 1 mi / 5 K / 10 K, longest, best pace) | The most-checked screen in any run app | splits from `RoutePoint` |
 | **Elevation gain** | Contextualises a "slow" run | `RouteMath.elevationGain` |
 | **Cadence** (steps/min) | Form metric; ~170–180 is the usual target. **No Watch needed** — `CMPedometer` already gives steps | `ActivitySession.steps ÷ activeSeconds` |
-| **Training load / ACWR** | 7-day load ÷ 28-day load. **>1.5 is an established elevated-injury-risk band** — a genuinely useful, honest warning | derived |
+| **Training load / ACWR** | 7-day load ÷ 28-day load. ⚠️ The ">1.5 = elevated injury risk" band is **open for review** — see §6 | derived |
 
 ### Tier 2 — needs heart rate (read from HealthKit)
 | Metric | Why it matters |
@@ -236,3 +236,67 @@ data at all. Cheaper than decoupling and worth doing first.
 **Reordering note:** `ROADMAP.md` Phase 3 put the Watch app (3.6) ahead of HR
 analytics. Item 3 above shows that's unnecessary — HR analytics can ship in
 Phase 2 as a read-only feature, and the Watch becomes a separate, later win.
+
+---
+
+## 6. Open for review — the ACWR 1.5 threshold
+
+**Raised 2026-08-03. Nothing has been changed in the app; this is a decision to make.**
+
+### The problem
+
+Two apps in the same suite make **opposite claims about the same metric**, and neither cites
+anything.
+
+| | Claim | Where |
+|---|---|---|
+| **RunKit** | "Ratios above 1.5 are linked to higher injury risk" + `isElevated` at ≥1.5 | `StatsView.swift`, `StatsCalculator.swift`, §2 above |
+| **LiftKit** | "The published *sweet spot* bands around this metric are **contested** … LiftKit shows the number with no band, no colour coding, and no interpretation" | `docs/TRAINING-LOAD.md` §Acute:chronic |
+
+A user with both apps installed can see the same ratio treated as a warning in one and a
+bare number in the other. Whichever way it resolves, they should agree.
+
+### Why the band is doubted
+
+Recollection, **not verified against sources** — the review needs real references before
+anything is decided either way:
+
+- **Mathematical coupling.** In the usual "coupled" form the 7-day window is *inside* the
+  28-day window, so numerator and denominator share data. That inflates the apparent
+  association with injury independently of any real effect.
+- **Ratios of correlated quantities produce spurious relationships** as a statistical
+  artefact, separate from the coupling issue.
+- **A random denominator performs about as well.** The finding usually cited as the most
+  damaging: substituting a random value for chronic load reportedly gave a similar
+  association with injury, which is hard to square with the ratio measuring what it claims.
+- **The bands are highly sensitive to arbitrary choices** — window lengths, rolling average
+  versus exponentially-weighted smoothing, and how load itself is defined. Move any of those
+  and the "sweet spot" moves.
+
+Names to check: Gabbett for the original proposal; Impellizzeri, Lolli, Coutts, Vigotsky,
+Shrier and Nielsen among the critics. **Verify before quoting** — these are from memory and
+the specific papers, years and findings need confirming.
+
+### Options
+
+1. **Keep the band, cite it.** Defensible if the sources hold up. Then LiftKit's doc is
+   wrong and should adopt the same band.
+2. **Drop the band, keep the number.** Show the ratio, no threshold, no colour. Matches
+   LiftKit today and the suite's "present the data, don't judge" rule.
+3. **Keep it, soften the framing.** State it as one coaching heuristic among several rather
+   than an established risk band, with the coupling caveat attached.
+
+### The wider question this sits inside
+
+`CHART-STYLE.md` §6 says a baseline band must come from **the user's own data** and never be
+"an external prescription dressed up as a target". A fixed 1.5 line is exactly an external
+prescription. So is LiftKit's 10-sets-per-muscle-per-week reference line on the hard-set
+chart — labelled as a reference rather than a target, but still externally derived.
+
+Either §6 needs an explicit carve-out for clearly-labelled literature references, or both
+lines have to go. Worth settling once, since it decides more than this one threshold.
+
+### Not FuelKit's problem
+
+FuelKit's stats page is scoped to weight, body measurements and macro goals, and charts no
+training load at all — so this affects RunKit and LiftKit only.
