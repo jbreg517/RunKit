@@ -51,6 +51,13 @@ struct WatchSessionPayload: Codable, Hashable {
     /// Treadmill, track or stationary bike — drives HKMetadataKeyIndoorWorkout and
     /// keeps the phone from filing a treadmill run alongside outdoor efforts.
     var isIndoor: Bool = false
+    /// External weight carried, in kilograms — a ruck. 0 for an unweighted session.
+    ///
+    /// The watch's `activeEnergyKcal` is **not** adjusted for it: that figure is
+    /// Apple's own measurement with live heart rate behind it, and a pack shows up
+    /// there as a higher heart rate already. Only RunKit's own phone-side estimate
+    /// scales with load.
+    var ruckWeightKg: Double = 0
     /// Steps over the workout. Carried so `StatsCalculator.averageCadence` works for
     /// wrist-recorded runs — it reads `ActivitySession.steps`, and without this a
     /// watch run would silently drop out of the cadence average.
@@ -88,6 +95,7 @@ struct WatchSessionPayload: Codable, Hashable {
         usedGPS = try c.decodeIfPresent(Bool.self, forKey: .usedGPS) ?? false
         steps = try c.decodeIfPresent(Int.self, forKey: .steps) ?? 0
         isIndoor = try c.decodeIfPresent(Bool.self, forKey: .isIndoor) ?? false
+        ruckWeightKg = try c.decodeIfPresent(Double.self, forKey: .ruckWeightKg) ?? 0
         avgHeartRateBpm = try c.decodeIfPresent(Double.self, forKey: .avgHeartRateBpm) ?? 0
         maxHeartRateBpm = try c.decodeIfPresent(Double.self, forKey: .maxHeartRateBpm) ?? 0
         let zones = try c.decodeIfPresent([Double].self, forKey: .hrZoneSeconds) ?? []

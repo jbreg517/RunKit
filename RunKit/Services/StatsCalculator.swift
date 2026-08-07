@@ -62,6 +62,37 @@ enum StatsCalculator {
         return completed.filter { $0.startedAt >= start }
     }
 
+    // MARK: Weighted carries
+
+    /// Rucking volume over a period. Zeroed rather than optional — the caller shows
+    /// the card only when `sessions > 0`, and an empty struct reads better than an
+    /// optional at every call site.
+    struct RuckTotals {
+        var sessions = 0
+        var meters = 0.0
+        var seconds = 0.0
+        /// Kilograms moved over distance: the tonnage analogue, and the figure that
+        /// makes a heavy short ruck and a light long one comparable.
+        var kgKilometers = 0.0
+        /// Time under load, for rucks with no distance to speak of (a treadmill).
+        var kgMinutes = 0.0
+        var heaviestKg = 0.0
+    }
+
+    static func ruckTotals(_ sessions: [ActivitySession], period: Period,
+                           now: Date = Date(), calendar cal: Calendar = .current) -> RuckTotals {
+        var t = RuckTotals()
+        for s in inPeriod(sessions, period, now: now, calendar: cal) where s.isRuck {
+            t.sessions += 1
+            t.meters += s.distanceMeters
+            t.seconds += s.activeSeconds
+            t.kgKilometers += s.loadKgKilometers
+            t.kgMinutes += s.loadKgMinutes
+            t.heaviestKg = max(t.heaviestKg, s.ruckWeightKg)
+        }
+        return t
+    }
+
     // MARK: Weekly volume
 
     struct WeekBucket: Identifiable {

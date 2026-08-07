@@ -118,6 +118,17 @@ enum SharedStoreRecovery {
             copy.hasDecoupling = old.hasDecoupling
             copy.decouplingNote = old.decouplingNote
             copy.notes = old.notes
+            // Everything added since this copier was written. A field missed here is
+            // silently dropped on recovery, which is the worst kind of data loss:
+            // the sessions all survive, so nobody notices the pack weights and
+            // treadmill flags went with them.
+            copy.isIndoor = old.isIndoor
+            copy.isPendingReview = old.isPendingReview
+            copy.fromScheduleID = old.fromScheduleID
+            copy.editedAt = old.editedAt
+            copy.ruckWeightKg = old.ruckWeightKg
+            copy.bodyweightKg = old.bodyweightKg
+            copy.energyMeasured = old.energyMeasured
             destination.insert(copy)
             sessionByID[old.id] = copy
             summary.sessions += 1

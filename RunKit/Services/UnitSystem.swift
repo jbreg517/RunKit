@@ -16,8 +16,57 @@ enum UnitSystem: String, CaseIterable, Identifiable {
     var speedUnit: String     { self == .metric ? "km/h" : "mph" }
     var elevationUnit: String { self == .metric ? "m"    : "ft"  }
 
+    var weightUnit: String    { self == .metric ? "kg"   : "lb"  }
+
     private static let metersPerMile = 1609.344
     private static let feetPerMeter  = 3.28084
+    private static let poundsPerKg   = 2.2046226
+
+    // MARK: Weight
+    //
+    // Ruck loads are stored in kilograms everywhere — model, wire format, HealthKit
+    // metadata — and converted only for display. Storing whatever the user happened
+    // to be looking at would rewrite their history the moment they switched units.
+
+    /// Kilograms → display weight (kg or lb).
+    func weight(_ kg: Double) -> Double {
+        self == .metric ? kg : kg * Self.poundsPerKg
+    }
+
+    /// Display weight (kg or lb) → kilograms.
+    func kilograms(fromDisplay value: Double) -> Double {
+        self == .metric ? value : value / Self.poundsPerKg
+    }
+
+    /// Typed display weight → kilograms. `nil` when unparseable, which callers treat
+    /// as "leave it alone" rather than as zero.
+    func kilograms(fromDisplay text: String) -> Double? {
+        let normalized = text.replacingOccurrences(of: ",", with: ".")
+            .trimmingCharacters(in: .whitespaces)
+        guard let value = Double(normalized), value >= 0 else { return nil }
+        return kilograms(fromDisplay: value)
+    }
+
+    func weightString(_ kg: Double, digits: Int = 1) -> String {
+        String(format: "%.\(digits)f %@", weight(kg), weightUnit)
+    }
+
+    /// A step that lands on round numbers in the unit being shown: plates and pack
+    /// weights come in 2.5 kg or 5 lb, and a stepper that moves in converted
+    /// fractions is unusable.
+    var weightStepKg: Double { self == .metric ? 2.5 : 5 / Self.poundsPerKg }
+
+    /// Kilogram-kilometres — the ruck volume figure — in display units (kg·km or
+    /// lb·mi). Both factors convert, so this is not a simple scale of the metric one.
+    func loadVolume(kgKilometers: Double) -> Double {
+        self == .metric ? kgKilometers
+                        : kgKilometers * Self.poundsPerKg * 1000 / Self.metersPerMile
+    }
+
+    func loadVolumeString(kgKilometers: Double) -> String {
+        String(format: "%.0f %@·%@", loadVolume(kgKilometers: kgKilometers),
+               weightUnit, distanceUnit)
+    }
 
     /// Metres in one display unit — 1000 for a kilometre, 1609.344 for a mile.
     var metersPerUnit: Double { self == .metric ? 1000 : Self.metersPerMile }

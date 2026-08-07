@@ -110,6 +110,7 @@ struct StatsView: View {
                 weeklyVolumeCard
                 loadCard
                 cadenceCard
+                ruckCard
                 heartRateCard
                 cardioFitnessCard
                 efficiencyCard
@@ -325,6 +326,47 @@ struct StatsView: View {
             return "\(pct)% easy. Polarized training suggests nearer 80% — consider slowing your easy runs."
         }
         return "Only \(pct)% easy. Running easy runs too hard is the most common amateur mistake; aim nearer 80%."
+    }
+
+    /// Loaded volume — rucking's answer to tonnage.
+    ///
+    /// Present only when there are rucks in the period. Someone who never carries
+    /// weight should see no trace of the feature, which is the deal a toggle makes.
+    @ViewBuilder
+    private var ruckCard: some View {
+        let t = StatsCalculator.ruckTotals(sessions, period: period)
+        if t.sessions > 0 {
+            VStack(alignment: .leading, spacing: RKSpacing.sm) {
+                HStack {
+                    Label("Loaded volume", systemImage: "backpack.fill")
+                        .font(RKFont.heading).foregroundColor(RKColor.textPrimary)
+                    Spacer()
+                    // kg·km where there was distance; kg·min is the only volume a
+                    // treadmill ruck has, so it stands in rather than showing zero.
+                    Text(t.kgKilometers > 0
+                         ? unit.loadVolumeString(kgKilometers: t.kgKilometers)
+                         // Only the mass factor converts here, so the weight
+                         // conversion applies directly to the product.
+                         : String(format: "%.0f %@·min", unit.weight(t.kgMinutes), unit.weightUnit))
+                        .font(RKFont.bodyBold).foregroundColor(RKColor.accent)
+                }
+                HStack(spacing: RKSpacing.lg) {
+                    smallStat("Rucks", "\(t.sessions)")
+                    smallStat("Distance", unit.distanceString(t.meters))
+                    smallStat("Heaviest", unit.weightString(t.heaviestKg,
+                                                            digits: unit == .metric ? 1 : 0))
+                }
+                Text("Weight × distance, the way tonnage works in the gym. Shared with LiftKit, so weighted carries count toward your load there too.")
+                    .font(RKFont.caption)
+                    .foregroundColor(RKColor.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(RKSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RKColor.surface)
+            .cornerRadius(RKRadius.large)
+            .padding(.horizontal, RKSpacing.md)
+        }
     }
 
     /// Apple's own VO₂ max estimate, charted over a year.

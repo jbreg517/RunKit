@@ -17,6 +17,9 @@ struct RunEdits: Equatable {
     var durationText = ""
     /// In the user's display units.
     var distanceText = ""
+    /// Pack weight in the user's display units. Empty means "no weight carried",
+    /// which is how a mis-toggled ruck gets taken back off a session.
+    var ruckWeightText = ""
     var name = ""
     var notes = ""
 
@@ -28,6 +31,8 @@ struct RunEdits: Equatable {
         type = session.type
         durationText = Self.durationText(session.activeSeconds)
         distanceText = String(format: "%.2f", unit.distance(session.distanceMeters))
+        ruckWeightText = session.isRuck
+            ? String(format: "%.1f", unit.weight(session.ruckWeightKg)) : ""
         name = session.customWorkoutName
         notes = session.notes ?? ""
     }
@@ -58,6 +63,15 @@ struct RunEdits: Equatable {
             session.distanceEstimated = false
             changed = true
         }
+        // Unlike the other fields, an **empty** pack weight is a real instruction:
+        // it means the run wasn't weighted after all. Only junk is ignored.
+        let trimmedWeight = ruckWeightText.trimmingCharacters(in: .whitespaces)
+        let newLoad: Double? = trimmedWeight.isEmpty ? 0 : unit.kilograms(fromDisplay: trimmedWeight)
+        if let newLoad, abs(newLoad - session.ruckWeightKg) > 0.01 {
+            session.ruckWeightKg = newLoad
+            changed = true
+        }
+
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         if trimmedName != session.customWorkoutName {
             session.customWorkoutName = trimmedName
@@ -68,8 +82,26 @@ struct RunEdits: Equatable {
             session.notes = trimmedNotes.isEmpty ? nil : trimmedNotes
             changed = true
         }
-        if changed { session.editedAt = Date() }
+        if changed {
+            session.editedAt = Date()
+            recomputeEnergy(session)
+        }
         return changed
+    }
+
+    /// Keeps calories consistent with whatever the duration, activity and pack
+    /// weight ended up as — an edited hour left priced as a half hour would
+    /// contradict everything else on the screen, and that figure feeds FuelKit.
+    ///
+    /// **Skipped for a watch recording.** There the calories were measured by Apple
+    /// with live heart rate behind them; replacing that with a MET estimate would be
+    /// throwing away the better number.
+    private func recomputeEnergy(_ session: ActivitySession) {
+        guard !session.energyMeasured else { return }
+        session.activeEnergyKcal = HealthCalc.kcal(type: session.type,
+                                                   minutes: session.activeSeconds / 60,
+                                                   loadKg: session.ruckWeightKg,
+                                                   bodyweight: session.bodyweightKg)
     }
 
     // MARK: Duration text
@@ -135,6 +167,17 @@ struct RunEditForm: View {
                         .keyboardType(.decimalPad)
                         .textFieldStyle(.roundedBorder)
                 }
+            }
+
+            VStack(alignment: .leading, spacing: RKSpacing.xs) {
+                label("Pack weight (\(unit.weightUnit))")
+                TextField("None", text: $edits.ruckWeightText)
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                Text("Leave empty if you carried nothing. Changing this updates your loaded volume, and the calorie estimate with it.")
+                    .font(.system(size: 11))
+                    .foregroundColor(RKColor.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: RKSpacing.xs) {

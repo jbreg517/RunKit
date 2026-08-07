@@ -178,13 +178,23 @@ final class HealthService {
         do {
             try await builder.beginCollection(at: session.startedAt)
 
+            var metadata: [String: Any] = [:]
             // The metadata key, not just the location type, is what makes Apple
             // Health and Fitness display "Indoor Run". Without it a treadmill run is
             // filed as an ordinary one and its pace gets compared against outdoor
             // efforts it has nothing to do with.
-            if session.isIndoor {
-                try await addMetadata([HKMetadataKeyIndoorWorkout: true], to: builder)
+            if session.isIndoor { metadata[HKMetadataKeyIndoorWorkout] = true }
+            // Health has no notion of external load, so a ruck would otherwise be
+            // indistinguishable from an empty-handed walk. A custom key doesn't make
+            // Health display it, but it does mean the weight travels with the
+            // workout for anything that reads it back — including LiftKit.
+            if session.ruckWeightKg > 0 {
+                metadata[SuiteCarry.healthMetadataKey] = session.ruckWeightKg
             }
+            // `try?`, not `try`: a workout that failed to record its metadata is far
+            // better than a run that never saved because of it. Everything after
+            // this point is what actually persists the session.
+            if !metadata.isEmpty { try? await addMetadata(metadata, to: builder) }
 
             var samples: [HKSample] = []
             if session.activeEnergyKcal > 0,
@@ -279,7 +289,22 @@ enum HealthCalc {
         return 70.0
     }
 
-    static func kcal(type: ActivityType, minutes: Double) -> Double {
-        type.met * bodyweightKg() * (minutes / 60.0)
+    /// - Parameters:
+    ///   - loadKg: external weight carried (a ruck), 0 for an unweighted session.
+    ///   - bodyweight: bodyweight in kg at the time, 0 to use the latest known.
+    ///
+    /// Load scales the estimate by total transported mass — 20 kg on a 70 kg walker
+    /// is about 29% more work. That is the basis of the ACSM walking equations,
+    /// which are expressed per kilogram of *total* mass. Linear understates a very
+    /// heavy pack on a steep climb, but it errs low, and inventing burn that isn't
+    /// there would flow straight into FuelKit as real eating headroom.
+    ///
+    /// Only ever applied to RunKit's own estimate. A watch-recorded session carries
+    /// Apple's measured energy instead, and that is never adjusted after the fact.
+    static func kcal(type: ActivityType, minutes: Double,
+                     loadKg: Double = 0, bodyweight: Double = 0) -> Double {
+        let bw = bodyweight > 0 ? bodyweight : bodyweightKg()
+        let loadFactor = (loadKg > 0 && bw > 0) ? (bw + loadKg) / bw : 1
+        return type.met * bw * (minutes / 60.0) * loadFactor
     }
 }

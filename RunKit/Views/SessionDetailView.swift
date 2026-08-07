@@ -76,12 +76,9 @@ struct SessionDetailView: View {
     // MARK: Edit / delete
 
     private func applyEdits(_ edits: RunEdits) {
+        // Calories are recomputed inside `apply`, so the post-run review screen and
+        // this one can't drift apart on what an edit means.
         guard edits.apply(to: session, unit: unit) else { return }
-        // Recomputed from whatever the time and type ended up as — an edited
-        // duration that left the old calorie figure behind would be inconsistent
-        // with everything else on the screen.
-        session.activeEnergyKcal = HealthCalc.kcal(type: session.type,
-                                                   minutes: session.activeSeconds / 60)
         Persist.save(context)
         // Stats, streaks and the suite feed all read these numbers.
         SuiteActivityPublisher.publish(from: context)
@@ -137,8 +134,28 @@ struct SessionDetailView: View {
                 if session.type != .ride { stat("\(session.steps)", "steps", "shoeprints.fill") }
                 if maxSpd > 0 { stat(unit.speedString(metersPerSecond: maxSpd), "max speed", "speedometer") }
             }
+            ruckRow
         }
         .padding(.horizontal, RKSpacing.md)
+    }
+
+    /// The weighted-carry line. Only present on a ruck, so an ordinary walk is
+    /// unchanged — the whole point of the toggle is that it overlays.
+    @ViewBuilder
+    private var ruckRow: some View {
+        if session.isRuck {
+            HStack(spacing: RKSpacing.md) {
+                stat(unit.weightString(session.ruckWeightKg, digits: unit == .metric ? 1 : 0),
+                     "pack", "backpack.fill")
+                if session.distanceMeters > 0 {
+                    stat(unit.loadVolumeString(kgKilometers: session.loadKgKilometers),
+                         "loaded volume", "scalemass.fill")
+                }
+                if let ratio = session.loadRatio {
+                    stat("\(Int((ratio * 100).rounded()))%", "of bodyweight", "figure.stand")
+                }
+            }
+        }
     }
 
     // MARK: Splits
