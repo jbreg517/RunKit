@@ -37,6 +37,10 @@ struct WatchRunState: Codable {
     var elevationGain: Double = 0
     var usedGPS = false
     var isIndoor = false
+    /// External weight carried, in kilograms. Restored on recovery, because a ruck
+    /// that came back from a crash as an ordinary walk would lose the one thing the
+    /// user set by hand — and the pack is still on their back.
+    var ruckWeightKg: Double = 0
 
     // MARK: Persistence
 
@@ -87,5 +91,6 @@ struct WatchRunState: Codable {
         elevationGain = try c.decodeIfPresent(Double.self, forKey: .elevationGain) ?? 0
         usedGPS = try c.decodeIfPresent(Bool.self, forKey: .usedGPS) ?? false
         isIndoor = try c.decodeIfPresent(Bool.self, forKey: .isIndoor) ?? false
+        ruckWeightKg = try c.decodeIfPresent(Double.self, forKey: .ruckWeightKg) ?? 0
     }
 }

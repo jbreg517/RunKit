@@ -182,8 +182,10 @@ and FuelKit both edit the goal + measurements.
 
 ### App Group — `SuiteActivity` (`SuiteActivityStore`, keys `suiteActivityFeed.<app>`)
 
-`SuiteDailyLoad` (date, kind, load 0–1, perceivedEffort, sessionCount) +
-`SuitePlannedSession` (date, kind, title, plannedMinutes, plannedLoad).
+`SuiteDailyLoad` (date, kind, load 0–1, perceivedEffort, sessionCount, activeKcal,
+activeMinutes, sessionLoad) +
+`SuitePlannedSession` (date, kind, title, plannedMinutes, plannedLoad) +
+`SuiteCarry` (id, startedAt, kind, title, loadKg, bodyweightKg, minutes, kilometers).
 
 | App | Role |
 |---|---|
@@ -193,6 +195,35 @@ and FuelKit both edit the goal + measurements.
 
 All three now participate: LiftKit and RunKit publish their training load + plans;
 FuelKit and RunKit consume it (RunKit reads others' load only, excluding its own).
+
+#### Weighted carries (`SuiteCarry`, v0.56)
+
+The one place the App Group deliberately carries something HealthKit *could* have
+held, and the reason is that it can't: **Health has no concept of external load.** A
+20 kg ruck and an empty-handed walk save as the same workout. RunKit does also attach
+the weight to its own workout as custom metadata under
+`SuiteCarry.healthMetadataKey` (`com.ferrixguild.suite.externalLoadKg`), so anything
+reading workouts directly finds it — but that costs the reader full
+`HKObjectType.workoutType()` permission plus a query per workout, which is a lot to
+ask of a strength app that just wants a volume number.
+
+| App | Role |
+|---|---|
+| RunKit | **W** — one entry per ruck, in the same 14-day window as `recentLoad` |
+| LiftKit | **R** (to build) — `SuiteActivityStore.carryVolume(excluding:since:)` returns sessions / kg·km / kg·min / heaviest |
+| FuelKit | — (no use; carries already reach it as `activeKcal`) |
+
+Shape notes that matter to a reader:
+
+- **Per session, not per day.** A 10 kg hour and a 30 kg twenty minutes are different
+  training; averaging them to "20 kg" describes a session nobody did.
+- **`kgKilometers` and `kgMinutes` are computed, not stored** — they can't drift from
+  the weight and distance they come from, and both add up across sessions, which is
+  what makes merging across apps correct.
+- **The carry id is the producing app's own session id**, so republishing on every
+  foreground is stable rather than duplicating.
+- **Rucks awaiting review are not published.** RunKit's two-phase commit means a run
+  the user then discards must leave no trace in another app's volume.
 
 ### Open gaps (this audit)
 

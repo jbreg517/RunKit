@@ -11,6 +11,9 @@ struct WatchSessionView: View {
     /// construct it — the controller has already restored its own indoor state by
     /// then and `start` is not called again.
     var indoor = false
+    /// Pack weight in kilograms, 0 when nothing is being carried. Defaults for the
+    /// same reason `indoor` does — the recovery path restores it from saved state.
+    var ruckKg: Double = 0
     @Environment(\.dismiss) private var dismiss
     /// `.inactive` is Always-On: the wrist is down, the screen is dimmed and
     /// refreshing about once a minute. Not "the app is backgrounded" — the run is
@@ -54,7 +57,7 @@ struct WatchSessionView: View {
             // hasn't been read. A previous failure *should* retry.
             switch controller.phase {
             case .running, .paused, .ending, .saved: break
-            case .idle, .failed:                     controller.start(item, indoor: indoor)
+            case .idle, .failed:                     controller.start(item, indoor: indoor, ruckKg: ruckKg)
             }
         }
     }

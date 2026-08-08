@@ -27,14 +27,20 @@ enum SuiteActivityPublisher {
                         now: Date = Date()) {
         // Newest first: `recentPace` takes the most recent runs, and the caller's
         // fetch order isn't guaranteed.
+        //
+        // Runs still awaiting review are excluded. They exist in RunKit's store but
+        // the user hasn't accepted them, and a discarded ruck that another app had
+        // already counted toward its volume is exactly the kind of trace the
+        // two-phase commit exists to prevent.
         let completed = sessions
-            .filter { $0.endedAt != nil }
+            .filter { $0.endedAt != nil && !$0.isPendingReview }
             .sorted { $0.startedAt > $1.startedAt }
         let reference = referenceStrain(completed, now: now)
         let feed = SuiteActivityFeed(
             source: source,
             recentLoad: dailyLoads(completed, reference: reference, now: now),
-            planned: plannedSessions(scheduled, sessions: completed, reference: reference, now: now))
+            planned: plannedSessions(scheduled, sessions: completed, reference: reference, now: now),
+            carries: carries(completed, now: now))
         SuiteActivityStore.publish(feed)
     }
 
@@ -68,9 +74,50 @@ enum SuiteActivityPublisher {
                                   load: min(1, total / reference),
                                   perceivedEffort: 0,   // RunKit never asks for RPE
                                   sessionCount: daySessions.count,
-                                  activeKcal: kcal)
+                                  activeKcal: kcal,
+                                  activeMinutes: daySessions.reduce(0) { $0 + $1.activeSeconds / 60 },
+                                  // Session-RPE load stays 0: RunKit collects no RPE, and
+                                  // substituting TRIMP would put a different unit in a
+                                  // field readers sum across apps. See LiftKit's
+                                  // docs/TRAINING-LOAD.md.
+                                  sessionLoad: 0)
         }
         .sorted { $0.date < $1.date }
+    }
+
+    // MARK: - Weighted carries
+
+    /// Every ruck in the history window, one entry each.
+    ///
+    /// This is the channel's whole reason for existing where rucking is concerned:
+    /// a ruck saves to Apple Health as a plain walk, so without this the weight
+    /// never leaves RunKit and LiftKit has nothing to fold into its load tracking.
+    ///
+    /// The session's own id is reused as the carry id, so republishing the same
+    /// ruck — which happens on every foreground — is stable rather than producing a
+    /// new entry each time.
+    @MainActor
+    private static func carries(_ sessions: [ActivitySession], now: Date) -> [SuiteCarry] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: now)
+        guard let earliest = cal.date(byAdding: .day,
+                                      value: -SuiteActivityFeed.historyWindow,
+                                      to: today) else { return [] }
+        return sessions
+            .filter { $0.isRuck && $0.startedAt >= earliest }
+            .map { s in
+                SuiteCarry(id: s.id,
+                           startedAt: s.startedAt,
+                           kind: .ruck,
+                           title: s.customWorkoutName.isEmpty
+                               ? "Weighted \(s.type.rawValue.lowercased())"
+                               : s.customWorkoutName,
+                           loadKg: s.ruckWeightKg,
+                           bodyweightKg: s.bodyweightKg,
+                           minutes: s.activeSeconds / 60,
+                           kilometers: s.distanceMeters / 1000)
+            }
+            .sorted { $0.startedAt < $1.startedAt }
     }
 
     /// Raw, unnormalised strain for one session.
@@ -105,7 +152,12 @@ enum SuiteActivityPublisher {
         // length, which is the whole reason those sessions exist.
         let structureBump = (session.workoutType == .intervals || session.workoutType == .custom)
             ? 1.3 : 1.0
-        return minutes * weight * structureBump
+        // A pack makes the same walk harder. Applied only on this branch: where
+        // there *is* heart rate, TRIMP has already counted the extra work, and
+        // scaling it again would price the load twice.
+        let bw = session.bodyweightKg > 0 ? session.bodyweightKg : HealthCalc.bodyweightKg()
+        let loadBump = session.ruckWeightKg > 0 && bw > 0 ? (bw + session.ruckWeightKg) / bw : 1
+        return minutes * weight * structureBump * loadBump
     }
 
     /// What a hard day looks like **for this runner** — the 90th percentile of their

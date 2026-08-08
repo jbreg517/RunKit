@@ -39,6 +39,29 @@ final class ActivitySession {
     /// state so the tick-off survives the app being killed at the review screen —
     /// and so discarding the run leaves the plan untouched.
     var fromScheduleID: UUID?
+    /// External weight carried, in **kilograms**, 0 for an unweighted session.
+    ///
+    /// Stored in kg whatever the user's display units are, so switching to imperial
+    /// can't rewrite history. Like `isIndoor` this describes the *session*, not the
+    /// workout: the same 5 km route is a ruck on Tuesday and an ordinary walk on
+    /// Thursday, and putting the weight on the template would be wrong on Thursday.
+    ///
+    /// Deliberately a weight rather than a `ruck` flag — the flag is derivable from
+    /// the weight, and the weight is what LiftKit needs for load tracking.
+    var ruckWeightKg: Double = 0
+    /// The user's bodyweight in kg when this session started, or 0 if it wasn't
+    /// known. Snapshotted so load-as-a-share-of-bodyweight, and the calorie figure
+    /// derived from total transported mass, stay correct after their weight changes.
+    var bodyweightKg: Double = 0
+    /// True when `activeEnergyKcal` was **measured** rather than estimated — an
+    /// Apple Watch recording, where the figure comes from Apple's own model with
+    /// live heart rate behind it.
+    ///
+    /// Editing a session recomputes its calories from METs, which is right for a
+    /// phone estimate and destructive for a watch measurement. This is the flag that
+    /// tells the two apart. Defaults false, so every phone-recorded session behaves
+    /// exactly as it did before.
+    var energyMeasured: Bool = false
     var manualDistance: Bool = false
     /// True when some of `distanceMeters` came from a fallback (pedometer fill or
     /// a straight-line GPS-gap bridge) rather than a clean GPS track.
@@ -97,4 +120,18 @@ final class ActivitySession {
     var hrZoneSeconds: [Double] { HeartRateZones.decode(hrZoneSecondsJSON) }
     var hasHeartRate: Bool { avgHeartRateBpm > 0 }
     var sortedRoute: [RoutePoint] { route.sorted { $0.timestamp < $1.timestamp } }
+
+    // MARK: Weighted carry
+
+    var isRuck: Bool { ruckWeightKg > 0 }
+    /// Kilograms moved over distance — the tonnage analogue, and the figure that
+    /// makes two rucks comparable when one was heavier and the other longer.
+    var loadKgKilometers: Double { ruckWeightKg * distanceMeters / 1000 }
+    /// Time under load, in kg·min. The only volume figure a treadmill ruck has.
+    var loadKgMinutes: Double { ruckWeightKg * activeSeconds / 60 }
+    /// Load as a share of bodyweight, or nil when bodyweight wasn't known.
+    var loadRatio: Double? {
+        guard isRuck, bodyweightKg > 0 else { return nil }
+        return ruckWeightKg / bodyweightKg
+    }
 }

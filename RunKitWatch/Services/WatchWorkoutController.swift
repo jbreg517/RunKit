@@ -153,6 +153,8 @@ final class WatchWorkoutController: NSObject {
     private var elevationRef: Double?
     private var totalSteps = 0
     private(set) var isIndoor = false
+    /// External weight carried, in kilograms. 0 for an unweighted session.
+    private(set) var ruckWeightKg: Double = 0
     /// Rolling (elapsed, metres) samples, for pace when there's no GPS speed.
     private var paceTrail: [(t: TimeInterval, d: Double)] = []
     private var autoPause = AutoPauseDetector.forActivity(.run)
@@ -199,7 +201,7 @@ final class WatchWorkoutController: NSObject {
 
     // MARK: - Start
 
-    func start(_ item: WatchMenu.Item, indoor: Bool = false) {
+    func start(_ item: WatchMenu.Item, indoor: Bool = false, ruckKg: Double = 0) {
         // Anything but a live session may start a new one — including after a
         // failure, which otherwise locks the app out of recording until relaunch.
         guard phase != .running, phase != .paused, phase != .ending,
@@ -210,6 +212,10 @@ final class WatchWorkoutController: NSObject {
 
         let activity = item.activity
         isIndoor = indoor
+        // Carried on the payload and nothing else on this device: the watch's own
+        // energy figure is measured, and HealthKit has no external-load concept for
+        // the workout it writes. The phone is where the weight becomes data.
+        ruckWeightKg = ruckKg
         autoPause = AutoPauseDetector.forActivity(activity)
         let config = HKWorkoutConfiguration()
         config.activityType = Self.hkActivity(activity)
@@ -259,7 +265,7 @@ final class WatchWorkoutController: NSObject {
         markedUnits = 0; summary = nil; autoPaused = false
         cadence = 0; elevationGain = 0; splits = []
         lastSplitElapsed = 0; elevationRef = nil; totalSteps = 0
-        isIndoor = false; paceTrail = []
+        isIndoor = false; ruckWeightKg = 0; paceTrail = []
         autoPause.reset()
         maxBpm = 0; bpmSum = 0; bpmSamples = 0
         zoneSeconds = [Double](repeating: 0, count: 5)
@@ -596,6 +602,7 @@ final class WatchWorkoutController: NSObject {
         payload.usedGPS = usedGPS
         payload.steps = totalSteps
         payload.isIndoor = isIndoor
+        payload.ruckWeightKg = ruckWeightKg
         payload.avgHeartRateBpm = averageBpm()
         payload.maxHeartRateBpm = maxBpm
         payload.hrZoneSeconds = zoneSeconds
@@ -663,6 +670,7 @@ final class WatchWorkoutController: NSObject {
         s.elevationGain = elevationGain
         s.usedGPS = usedGPS
         s.isIndoor = isIndoor
+        s.ruckWeightKg = ruckWeightKg
         return s
     }
 
@@ -728,6 +736,7 @@ final class WatchWorkoutController: NSObject {
         elevationGain = state.elevationGain
         usedGPS = state.usedGPS
         isIndoor = state.isIndoor
+        ruckWeightKg = state.ruckWeightKg
         elapsed = Date().timeIntervalSince(state.startedAt) - state.pausedTotal
         autoPause = AutoPauseDetector.forActivity(state.item.activity)
 

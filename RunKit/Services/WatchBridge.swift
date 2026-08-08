@@ -219,6 +219,15 @@ extension WatchBridge {
         s.usedGPS = payload.usedGPS
         s.steps = payload.steps
         s.isIndoor = payload.isIndoor
+        s.ruckWeightKg = payload.ruckWeightKg
+        // Bodyweight is filled in here rather than sent: the watch has no reason to
+        // hold it, and this is the device that already caches it for calorie maths.
+        s.bodyweightKg = HealthService.shared.latestBodyweightKg ?? 0
+        // Apple measured this energy with live heart rate behind it. The flag stops
+        // a later edit replacing it with RunKit's MET estimate — which would be a
+        // strictly worse number, and would silently drop by the same edit that was
+        // meant to correct a distance.
+        s.energyMeasured = true
         // Explicitly settled, not merely left at its default. A wrist-recorded run
         // was written to Health by the watch before it ever left it, so it must
         // never enter the review flow — that would offer a Discard the phone cannot

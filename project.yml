@@ -11,7 +11,7 @@ settings:
     # CI rewrites this from AppVersion.current on every build, so it is never
     # load-bearing there — but keep it in sync anyway: a stale value misleads
     # anyone reading the repo, and it IS load-bearing for a local build.
-    MARKETING_VERSION: "0.54"
+    MARKETING_VERSION: "0.56"
     CURRENT_PROJECT_VERSION: "1"
     # No DEVELOPMENT_TEAM here on purpose: an empty string is still a value and
     # overrides what `xcode-project use-profiles` writes per target during the

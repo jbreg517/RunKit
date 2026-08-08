@@ -42,6 +42,15 @@ struct ActivitySessionView: View {
     /// treadmill session on Tuesday shouldn't silently make Saturday's park run
     /// indoor too.
     @State private var indoor = false
+    /// Whether this session carries weight. Not persisted, for exactly the reason
+    /// `indoor` isn't — and more so: silently attributing a 20 kg pack to a run
+    /// somebody did empty-handed corrupts both their calorie figure and the loaded
+    /// volume LiftKit reads.
+    @State private var rucking = false
+    /// The pack weight itself **is** remembered, in kilograms. People ruck with the
+    /// same pack, and re-dialling it every time is the kind of friction that stops
+    /// a feature being used.
+    @AppStorage("ruckWeightKg") private var ruckKg = 10.0
     /// Rolling (elapsed, metres) samples for pace when there's no GPS speed to read.
     @State private var paceTrail: [(t: TimeInterval, d: Double)] = []
 
@@ -237,6 +246,7 @@ struct ActivitySessionView: View {
     private var setup: some View {
         VStack(spacing: RKSpacing.lg) {
             gpsRow
+            ruckRow
             libraryRow
             cardStack
             setupWarnings
@@ -267,6 +277,51 @@ struct ActivitySessionView: View {
             }
         }
         .padding(.horizontal, RKSpacing.md)
+    }
+
+    /// Weighted ruck: an overlay on whatever else was configured, not a separate
+    /// activity. Every card, goal and workout type keeps working — the session just
+    /// also knows how much was on your back.
+    private var ruckRow: some View {
+        VStack(alignment: .leading, spacing: RKSpacing.sm) {
+            Toggle(isOn: $rucking.animation()) {
+                Label("Weighted ruck", systemImage: "backpack.fill")
+            }
+            .tint(RKColor.accent)
+            .onChange(of: rucking) { _, on in
+                // Snap to the step of the unit being shown, so an imperial user sees
+                // 20 lb rather than 22.0 lb from a stored 10 kg.
+                if on { ruckKg = (ruckKg / unit.weightStepKg).rounded() * unit.weightStepKg }
+            }
+
+            if rucking {
+                Stepper(value: $ruckKg, in: 0...80, step: unit.weightStepKg) {
+                    HStack {
+                        Text("Pack weight")
+                            .font(RKFont.body)
+                            .foregroundColor(RKColor.textSecondary)
+                        Spacer()
+                        Text(unit.weightString(ruckKg, digits: unit == .metric ? 1 : 0))
+                            .font(RKFont.bodyBold)
+                            .foregroundColor(RKColor.accent)
+                    }
+                }
+                Text(ruckNote)
+                    .font(RKFont.caption)
+                    .foregroundColor(RKColor.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, RKSpacing.md)
+    }
+
+    /// Percentage of bodyweight only when a **real** bodyweight is known — the
+    /// calorie fallback quietly assumes 70 kg, and a share of a number the user
+    /// never gave us would be a fabricated statistic.
+    private var ruckNote: String {
+        let base = "Recorded as loaded volume, and your calorie estimate rises with the extra mass."
+        guard let bw = HealthService.shared.latestBodyweightKg, bw > 0, ruckKg > 0 else { return base }
+        return "About \(Int((ruckKg / bw * 100).rounded()))% of your bodyweight. " + base
     }
 
     /// Library entry point. A single row, so the setup stays about the cards.
@@ -742,6 +797,10 @@ struct ActivitySessionView: View {
     private func beginActiveSession() {
         let s = ActivitySession(type: sessionActivity)
         s.isIndoor = indoor
+        s.ruckWeightKg = rucking ? ruckKg : 0
+        // Snapshotted at the start, not read at save time: it's what the calorie
+        // maths used, and what makes "35% of bodyweight" still true a year later.
+        s.bodyweightKg = HealthService.shared.latestBodyweightKg ?? 0
         // Indoors GPS is never used, whatever the stored preference says.
         s.usedGPS = gpsEnabled && !indoor
         s.workoutTypeRaw = workoutType.rawValue
@@ -1236,6 +1295,8 @@ struct ActivitySessionView: View {
         let meters = editing ? (unit.meters(fromDisplay: edits.distanceText) ?? s.distanceMeters)
                              : s.distanceMeters
         let type = editing ? edits.type : s.type
+        let load = editing ? (unit.kilograms(fromDisplay: edits.ruckWeightText) ?? s.ruckWeightKg)
+                           : s.ruckWeightKg
         return VStack(spacing: RKSpacing.md) {
             HStack {
                 reviewMetric(timeString(seconds), "time")
@@ -1251,6 +1312,16 @@ struct ActivitySessionView: View {
                 HStack {
                     reviewMetric("\(Int(s.avgHeartRateBpm))", "avg bpm")
                     reviewMetric("\(Int(s.maxHeartRateBpm))", "max bpm")
+                }
+            }
+            // Reads the edit fields for the same reason the others do: correcting a
+            // 20 kg entry to 15 should show the loaded volume Save will actually
+            // write, not the one that was recorded.
+            if load > 0 {
+                HStack {
+                    reviewMetric(unit.weightString(load, digits: unit == .metric ? 1 : 0), "pack")
+                    reviewMetric(unit.loadVolumeString(kgKilometers: load * meters / 1000),
+                                 "loaded volume")
                 }
             }
         }
@@ -1374,7 +1445,9 @@ struct ActivitySessionView: View {
 
         s.distanceMeters = distance
         s.distanceEstimated = estimated
-        s.activeEnergyKcal = kcal(perActivity: perActivity, fallbackSeconds: seconds, type: s.type)
+        s.activeEnergyKcal = kcal(perActivity: perActivity, fallbackSeconds: seconds,
+                                  type: s.type, loadKg: s.ruckWeightKg,
+                                  bodyweight: s.bodyweightKg)
         // Saved to RunKit's own store right away — the run must survive whatever
         // happens next. Everything harder to undo (Health, the suite feed, the
         // scheduled tick-off) waits for Save on the review screen; see
@@ -1397,12 +1470,19 @@ struct ActivitySessionView: View {
     /// one activity's MET value. Falls back to the session type when no per-card
     /// time was banked.
     private func kcal(perActivity: [String: TimeInterval], fallbackSeconds: Double,
-                      type: ActivityType) -> Double {
+                      type: ActivityType, loadKg: Double = 0,
+                      bodyweight: Double = 0) -> Double {
+        // The pack is carried through every card, so the load applies to each one
+        // rather than being added once at the end.
         let banked = perActivity.reduce(into: 0.0) { total, entry in
             guard let activity = ActivityType(rawValue: entry.key) else { return }
-            total += HealthCalc.kcal(type: activity, minutes: entry.value / 60)
+            total += HealthCalc.kcal(type: activity, minutes: entry.value / 60,
+                                     loadKg: loadKg, bodyweight: bodyweight)
         }
-        guard banked > 0 else { return HealthCalc.kcal(type: type, minutes: fallbackSeconds / 60) }
+        guard banked > 0 else {
+            return HealthCalc.kcal(type: type, minutes: fallbackSeconds / 60,
+                                   loadKg: loadKg, bodyweight: bodyweight)
+        }
         return banked
     }
 
