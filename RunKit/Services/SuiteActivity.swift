@@ -399,7 +399,13 @@ enum SuiteActivityStore {
     static func carries(excluding own: SuiteSource, since: Date? = nil) -> [SuiteCarry] {
         feeds(excluding: own)
             .flatMap(\.carries)
-            .filter { since.map { start in $0.startedAt >= start } ?? true }
+            // Not `since.map { start in $0.startedAt >= start }`: `$0` inside a closure that
+            // already names its own argument is a compile error, and it read as though the
+            // two referred to the same thing.
+            .filter { carry in
+                guard let since else { return true }
+                return carry.startedAt >= since
+            }
             .sorted { $0.startedAt < $1.startedAt }
     }
 
